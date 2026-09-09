@@ -29,7 +29,6 @@ const state = {
   wizardOpen: false,
   wizardStep: 0,
   setupRequired: false,
-  repairedAuthLink: false,
   people: [],
   importResults: [],
 };
@@ -382,21 +381,16 @@ async function renderLogin(mode = "login") {
   const loginMode = mode === "login";
   const recoverMode = mode === "recover";
   const bootstrapMode = mode === "bootstrap";
-  const repairMode = mode === "repair";
   const heading = bootstrapMode
     ? "Configure o primeiro acesso."
     : recoverMode
       ? "Recupere sua senha."
-      : repairMode
-        ? "Corrija seu link de acesso."
-        : "Entre no Portal CAFCM.";
+      : "Entre no Portal CAFCM.";
   const intro = bootstrapMode
     ? "Use a chave inicial fornecida nesta implantação. Depois disso, novos acessos serão criados somente por convite."
     : recoverMode
       ? "Informe o e-mail cadastrado para receber o link de recuperação."
-      : repairMode
-        ? "Se o e-mail abriu uma página localhost, cole abaixo o endereço completo que apareceu no navegador. A leitura acontece somente neste dispositivo."
-        : "O acesso é enviado pela CAFCM. Jovens, empresas e equipe visualizam somente o que corresponde ao seu perfil.";
+      : "O acesso é enviado pela CAFCM. Jovens, empresas e equipe visualizam somente o que corresponde ao seu perfil.";
 
   app.innerHTML = `
     <main class="auth-shell">
@@ -415,7 +409,6 @@ async function renderLogin(mode = "login") {
             </form>
             <div class="auth-links">
               <button type="button" class="text-link" data-auth-mode="recover">Esqueci minha senha</button>
-              <button type="button" class="text-link" data-auth-mode="repair">O link abriu localhost?</button>
               <button type="button" class="text-link setup-link" data-auth-mode="bootstrap" hidden>Configurar primeiro acesso da CAFCM</button>
             </div>
           ` : ""}
@@ -424,18 +417,6 @@ async function renderLogin(mode = "login") {
             <form id="recover-form" class="stack-form">
               <label>E-mail<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com" /></label>
               <button class="btn btn-primary btn-block" type="submit">Enviar link de recuperação</button>
-            </form>
-            <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
-          ` : ""}
-
-          ${repairMode ? `
-            <form id="link-repair-form" class="stack-form">
-              <label>Endereço que abriu no navegador
-                <textarea name="confirmationLink" rows="5" required autocomplete="off" spellcheck="false" placeholder="http://localhost:3000/#access_token=..."></textarea>
-                <small>O portal valida o link diretamente com o Supabase, remove os dados da tela e pede uma nova senha.</small>
-              </label>
-              <div class="privacy-note">Use somente o link que chegou no seu próprio e-mail. Nunca envie esse endereço por mensagem para outra pessoa.</div>
-              <button class="btn btn-primary btn-block" type="submit">Validar link com segurança</button>
             </form>
             <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
           ` : ""}
@@ -481,7 +462,6 @@ async function renderLogin(mode = "login") {
 }
 
 function renderPasswordSetup() {
-  const repairedLink = state.repairedAuthLink;
   app.innerHTML = `
     <main class="auth-shell compact-auth">
       <section class="auth-panel">
@@ -489,18 +469,16 @@ function renderPasswordSetup() {
         <div class="auth-main">
           <p class="eyebrow">Primeiro acesso</p>
           <h1>Crie sua senha.</h1>
-          <p class="auth-intro">${repairedLink
-            ? "O link foi validado. Defina uma senha pessoal; depois, você entrará novamente para invalidar o endereço antigo."
-            : "Defina uma senha pessoal para concluir o convite ou a recuperação da conta."}</p>
+          <p class="auth-intro">Defina uma senha pessoal para concluir o convite ou a recuperação da conta.</p>
           <form id="password-form" class="stack-form">
             <label>Nova senha<input name="password" type="password" autocomplete="new-password" minlength="10" required /><small>Mínimo de 10 caracteres.</small></label>
             <label>Confirme a senha<input name="confirmation" type="password" autocomplete="new-password" minlength="10" required /></label>
-            <button class="btn btn-primary btn-block" type="submit">${repairedLink ? "Salvar senha com segurança" : "Salvar senha e entrar"}</button>
+            <button class="btn btn-primary btn-block" type="submit">Salvar senha e entrar</button>
           </form>
         </div>
         <p class="auth-foot">Nunca compartilhe sua senha com terceiros.</p>
       </section>
-      <aside class="auth-context password-context"><div class="context-content">${icon("shield")}<h2>Seu acesso foi confirmado.</h2><p>${repairedLink ? "Depois de salvar, entre novamente com a nova senha. O endereço antigo deixará de manter sua sessão ativa." : "Depois de criar a senha, o guia rápido mostrará como usar o portal conforme o seu perfil."}</p></div></aside>
+      <aside class="auth-context password-context"><div class="context-content">${icon("shield")}<h2>Seu acesso foi confirmado.</h2><p>Depois de criar a senha, o guia rápido mostrará como usar o portal conforme o seu perfil.</p></div></aside>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
   `;
@@ -2034,47 +2012,6 @@ app.addEventListener("submit", async (event) => {
       return;
     }
 
-    if (form.id === "link-repair-form") {
-      let confirmationUrl;
-      try {
-        confirmationUrl = new URL(String(values.confirmationLink || "").trim());
-      } catch {
-        throw new Error("Cole o endereço completo exibido no navegador, começando por http://localhost:3000/.");
-      }
-
-      const acceptedHosts = new Set(["localhost", "127.0.0.1", new URL(SITE_ORIGIN).hostname]);
-      if (!["http:", "https:"].includes(confirmationUrl.protocol) || !acceptedHosts.has(confirmationUrl.hostname)) {
-        throw new Error("Este endereço não corresponde a um link de acesso do Portal CAFCM.");
-      }
-
-      const hash = new URLSearchParams(confirmationUrl.hash.slice(1));
-      const accessToken = hash.get("access_token") || confirmationUrl.searchParams.get("access_token");
-      const refreshToken = hash.get("refresh_token") || confirmationUrl.searchParams.get("refresh_token");
-      form.reset();
-      if (!accessToken || !refreshToken) {
-        throw new Error("O link está incompleto ou já não é válido. Solicite um novo convite ou uma recuperação de senha.");
-      }
-
-      const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-      if (sessionError || !sessionData.session) {
-        throw new Error("O link expirou ou já foi utilizado. Solicite um novo envio à CAFCM.");
-      }
-
-      const { error: userError } = await supabase.auth.getUser();
-      if (userError) {
-        await supabase.auth.signOut({ scope: "local" });
-        throw new Error("Não foi possível validar esse acesso. Solicite um novo envio à CAFCM.");
-      }
-
-      state.session = sessionData.session;
-      state.repairedAuthLink = true;
-      history.replaceState({}, "", location.pathname);
-      return renderPasswordSetup();
-    }
-
     if (form.id === "bootstrap-form") {
       await callAdmin({ action: "bootstrap", fullName: values.fullName, email: values.email, password: values.password, code: values.code });
       const { error } = await supabase.auth.signInWithPassword({ email: String(values.email).trim(), password: String(values.password) });
@@ -2088,14 +2025,6 @@ app.addEventListener("submit", async (event) => {
       const { error } = await supabase.auth.updateUser({ password: String(values.password) });
       if (error) throw error;
       history.replaceState({}, "", location.pathname);
-      if (state.repairedAuthLink) {
-        await supabase.auth.signOut({ scope: "global" });
-        state.session = null;
-        state.repairedAuthLink = false;
-        await renderLogin();
-        showToast("Senha criada. Entre novamente com seu e-mail e a nova senha.");
-        return;
-      }
       return await loadPortal();
     }
 
@@ -2402,7 +2331,6 @@ async function init() {
 
   const { data } = await supabase.auth.getSession();
   state.session = data.session;
-  state.repairedAuthLink = false;
 
   if (state.session && ["invite", "recovery", "signup"].includes(hashType || queryType)) {
     return renderPasswordSetup();
