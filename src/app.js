@@ -37,7 +37,7 @@ const state = {
 const roleLabels = {
   cafcm_admin: "Equipe CAFCM",
   apprentice: "Jovem aprendiz",
-  company: "Empresa parceira",
+  company: "Representante da empresa",
 };
 
 const blockTypeLabels = {
@@ -122,9 +122,11 @@ const wizardContent = {
     ["Envio de atividades", "Responda às atividades dentro do prazo. A empresa vê o status, mas não vê sua resposta."],
   ],
   company: [
-    ["Jovens vinculados", "A empresa visualiza somente os aprendizes vinculados a ela pela CAFCM."],
-    ["Acompanhamento", "Consulte matrícula, aulas concluídas e situação das atividades sem alterar nenhum dado."],
-    ["Privacidade", "Respostas das atividades e dados de outros jovens ou empresas não ficam disponíveis neste acesso."],
+    ["Comece pela Visão geral", "Use os cartões do início para conferir quantos jovens estão vinculados, quantos já possuem matrícula e quantas atividades foram enviadas."],
+    ["Abra a lista de Aprendizes", "No menu Aprendizes, localize o jovem que deseja acompanhar. Os cursos vinculados aparecem logo abaixo do nome."],
+    ["Leia o progresso do curso", "A barra mostra o percentual de aulas concluídas. A linha de detalhes informa quantas aulas foram finalizadas e quantas atividades já foram enviadas."],
+    ["Avalie a situação", "Use os indicadores Ainda não iniciou, Em andamento e Concluído para identificar rapidamente quem precisa de atenção ou orientação."],
+    ["Defina a próxima ação", "Se notar pouco avanço ou atividades ainda não enviadas, converse com o jovem e alinhe o acompanhamento com a CAFCM. As respostas das atividades permanecem protegidas."],
   ],
 };
 
@@ -292,7 +294,7 @@ function viewTitle(view) {
     "student-courses": ["Meus cursos", "Conteúdos liberados pela CAFCM"],
     "student-activities": ["Atividades", "Acompanhe seus envios"],
     "student-course": ["Curso", "Aulas e atividades"],
-    "company-home": ["Visão geral", "Acompanhamento autorizado pela CAFCM"],
+    "company-home": ["Visão geral", "Progresso dos jovens da sua empresa"],
     "company-apprentices": ["Aprendizes", "Jovens vinculados à sua empresa"],
   };
   return titles[view] || ["Portal CAFCM", "Aprendizagem"];
@@ -458,7 +460,7 @@ async function renderLogin(mode = "login") {
           <div class="context-list">
             <article>${icon("shield")}<div><strong>CAFCM</strong><p>Organiza empresas, pessoas, cursos e matrículas.</p></div></article>
             <article>${icon("book")}<div><strong>Jovem aprendiz</strong><p>Acessa aulas, registra progresso e envia atividades.</p></div></article>
-            <article>${icon("building")}<div><strong>Empresa</strong><p>Acompanha somente os jovens vinculados, sem acesso às respostas.</p></div></article>
+            <article>${icon("building")}<div><strong>Representante da empresa</strong><p>Consulta o desenvolvimento dos jovens vinculados à organização.</p></div></article>
           </div>
         </div>
       </aside>
@@ -1200,7 +1202,7 @@ async function renderCompanyHome(content) {
   const enrolled = new Set(data.enrollments.map((item) => item.apprentice_id)).size;
   const submissions = data.attempts.length;
   content.innerHTML = `
-    ${pageHead("Acompanhamento da empresa", "Os dados exibidos são somente dos jovens vinculados pela CAFCM.")}
+    ${pageHead("Acompanhamento dos jovens", "Consulte o avanço nos cursos e os envios de atividades dos aprendizes vinculados à sua empresa.")}
     <section class="metric-grid three">
       ${metric("Jovens vinculados", data.apprentices.length, "users")}
       ${metric("Jovens com matrícula", enrolled, "book")}
@@ -1216,7 +1218,7 @@ async function renderCompanyHome(content) {
 async function renderCompanyApprentices(content) {
   const data = await getCompanyData();
   content.innerHTML = `
-    ${pageHead("Aprendizes vinculados", "Consulta em modo somente leitura. Respostas e dados de outras empresas não são exibidos.")}
+    ${pageHead("Aprendizes vinculados", "Use os indicadores de cada curso para acompanhar o estudo e orientar os próximos passos com o jovem e a CAFCM.")}
     <section class="card">${data.apprentices.length ? companyRows(data, true) : emptyState("Nenhum jovem vinculado", "A CAFCM é responsável por criar e atualizar os vínculos.")}</section>
   `;
 }
@@ -1232,7 +1234,13 @@ function companyRows(data, detailed = false) {
         const completed = data.progress.filter((item) => item.apprentice_id === apprentice.id && item.course_id === course.id).length;
         const submitted = data.attempts.filter((item) => item.apprentice_id === apprentice.id && data.activities.some((activity) => activity.id === item.activity_id && activity.course_id === course.id)).length;
         const percent = progressPercent(completed, course.lessons_count);
-        return `<div class="company-course"><div><strong>${escapeHtml(course.title)}</strong><small>Matrícula em ${formatDate(enrollment.assigned_at)}</small></div><div class="company-progress"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div>${detailed ? `<small>${completed}/${course.lessons_count} aulas · ${submitted}/${course.activities_count} atividades enviadas</small>` : ""}</div>`;
+        const activityTotal = Number(course.activities_count || 0);
+        const studyStatus = percent === 100 && submitted >= activityTotal
+          ? ["Concluído", "complete"]
+          : completed === 0 && submitted === 0
+            ? ["Ainda não iniciou", "not-started"]
+            : ["Em andamento", "in-progress"];
+        return `<div class="company-course"><div><strong>${escapeHtml(course.title)}</strong><small>Matrícula em ${formatDate(enrollment.assigned_at)}</small>${detailed ? `<span class="study-status study-status-${studyStatus[1]}">${studyStatus[0]}</span>` : ""}</div><div class="company-progress"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div>${detailed ? `<small class="company-course-summary">${completed}/${course.lessons_count} aulas concluídas · ${submitted}/${activityTotal} atividades enviadas</small>` : ""}</div>`;
       }).join("")}</div>` : `<p class="muted-note">Ainda sem matrícula em curso.</p>`}
     </article>`;
   }).join("")}</div>`;
@@ -1248,7 +1256,7 @@ function renderWizard() {
     <div class="dialog-backdrop">
       <section class="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
         <button class="dialog-close" data-close-wizard aria-label="Fechar guia">${icon("close")}</button>
-        <div class="wizard-visual"><span>${icon(index === 0 ? "home" : index === steps.length - 1 ? "shield" : "arrow")}</span><small>Guia do perfil</small><strong>${roleLabels[state.profile.role]}</strong></div>
+        <div class="wizard-visual"><span>${icon(index === 0 ? "home" : index === steps.length - 1 ? "shield" : "arrow")}</span><small>Guia de uso</small><strong>${roleLabels[state.profile.role]}</strong></div>
         <div class="wizard-copy">
           <div class="wizard-progress">${steps.map((_, stepIndex) => `<span class="${stepIndex <= index ? "active" : ""}"></span>`).join("")}</div>
           <p class="eyebrow">Passo ${index + 1} de ${steps.length}</p>

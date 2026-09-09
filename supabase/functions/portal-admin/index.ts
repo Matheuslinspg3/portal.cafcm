@@ -1,6 +1,6 @@
 import { createSupabaseContext } from "npm:@supabase/server@1.5.3";
 
-const DEFAULT_SITE_ORIGIN = "https://portal-cafcm-jovem.janeebraden7222.chatgpt.site";
+const DEFAULT_SITE_ORIGIN = "https://portal.cafcm.org.br";
 const BOOTSTRAP_HASH = Deno.env.get("PORTAL_BOOTSTRAP_HASH") ?? "";
 const ROLE_VALUES = new Set(["cafcm_admin", "apprentice", "company"]);
 
@@ -377,6 +377,7 @@ async function bootstrapAdmin(req: Request, input: Record<string, unknown>) {
 }
 
 async function provisionInvitedUser(
+  req: Request,
   admin: any,
   requesterId: string,
   person: { email: string; fullName: string; role: string; companyId: string | null; password?: string },
@@ -471,7 +472,7 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
   }
 
   try {
-    const result = await provisionInvitedUser(ctx.supabaseAdmin, requesterId, {
+    const result = await provisionInvitedUser(req, ctx.supabaseAdmin, requesterId, {
       email,
       fullName,
       role,
@@ -809,7 +810,7 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
         const { error: contactError } = await ctx.supabaseAdmin.from("profile_contacts").upsert({ id: userId, email });
         if (profileError || contactError) throw new Error("Não foi possível atualizar o perfil.");
       } else {
-        const created = await provisionInvitedUser(ctx.supabaseAdmin, requesterId, {
+        const created = await provisionInvitedUser(req, ctx.supabaseAdmin, requesterId, {
           email,
           fullName,
           role,

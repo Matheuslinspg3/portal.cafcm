@@ -1081,6 +1081,19 @@ input:focus, select:focus, textarea:focus {
 .company-course small { display: block; }
 .company-course small { margin-top: 4px; color: var(--muted); font-size: .72rem; }
 .company-progress > span { flex: 1; }
+.study-status {
+  width: fit-content;
+  margin-top: 9px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.study-status-complete { color: #0e6d49; background: var(--green-soft); }
+.study-status-in-progress { color: #0753b4; background: var(--blue-soft); }
+.study-status-not-started { color: #87500d; background: var(--orange-soft); }
+.company-course-summary { grid-column: 1 / -1; }
 .muted-note { margin: 14px 0 0 52px; color: var(--muted); font-size: .83rem; }
 
 /* Empty, notices, overlays */

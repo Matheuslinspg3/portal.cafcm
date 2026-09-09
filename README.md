@@ -15,7 +15,7 @@ Portal real de aprendizagem e acompanhamento de jovens aprendizes. A CAFCM admin
 1. Na Vercel, escolha **Add New > Project** e importe `Matheuslinspg3/portal.cafcm`.
 2. Mantenha a pasta raiz do projeto como `./`.
 3. O `vercel.json` já define o comando `npm run build` e a saída `dist`.
-4. Clique em **Deploy** e copie a URL de produção criada pela Vercel.
+4. Clique em **Deploy**. O domínio oficial do projeto é `https://portal.cafcm.org.br`.
 
 Não é necessário cadastrar uma chave secreta na Vercel. O navegador usa somente a chave publicável do Supabase; operações privilegiadas permanecem na Edge Function e são validadas pelo usuário autenticado e pelo perfil CAFCM.
 
@@ -25,7 +25,7 @@ Para que convites, confirmação de e-mail e recuperação de senha abram o novo
 
 1. Abra o projeto `cyovnmnxzrfptyfrivdr` no Supabase.
 2. Vá a **Authentication > URL Configuration**.
-3. Defina **Site URL** com a URL de produção da Vercel, sem caminho adicional.
+3. Defina **Site URL** como `https://portal.cafcm.org.br`.
 4. Adicione essa mesma origem às **Redirect URLs**. Para previews, adicione também o padrão recomendado pela documentação do Supabase para a sua conta Vercel.
 5. Reimplante a função `portal-admin` deste repositório para que os convites usem automaticamente a origem que fez a solicitação:
 
@@ -37,7 +37,7 @@ Para que convites, confirmação de e-mail e recuperação de senha abram o novo
 A função aceita o domínio atual do Portal CAFCM, endereços locais de desenvolvimento e implantações HTTPS em `vercel.app`. Se usar domínio próprio, configure no Supabase o segredo `PORTAL_SITE_ORIGINS` com uma ou mais origens exatas separadas por vírgula, por exemplo:
 
 ```text
-PORTAL_SITE_ORIGINS=https://portal.exemplo.org.br,https://portal-cafcm.vercel.app
+PORTAL_SITE_ORIGINS=https://portal.cafcm.org.br,https://portal-cafcm.vercel.app
 ```
 
 O segredo `PORTAL_BOOTSTRAP_HASH` é necessário somente ao inicializar uma instalação nova e sem nenhum administrador. Ele deve conter o SHA-256 de uma chave inicial longa e aleatória. Na base CAFCM atual, o primeiro acesso já foi configurado.
@@ -56,7 +56,7 @@ Nunca salve a API key do Resend, a `service_role` do Supabase, senhas ou tokens 
 
 ## Desenvolvimento local
 
-Requer Node.js 20 ou mais recente.
+Requer Node.js 22 ou mais recente.
 
 ```bash
 npm ci
