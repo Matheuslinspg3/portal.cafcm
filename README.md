@@ -1,12 +1,23 @@
 # Portal CAFCM
 
-Portal real de aprendizagem e acompanhamento de jovens aprendizes. A CAFCM administra empresas, pessoas, cursos, aulas, linhas de aprendizagem, atividades e matrículas; jovens estudam e registram seu progresso; empresas visualizam apenas os jovens vinculados a elas.
+Portal real de aprendizagem, acompanhamento e operação dos programas de jovens aprendizes. A CAFCM administra empresas, pessoas, cursos, aulas, atividades, matrículas, processos e tarefas; jovens estudam e registram seu progresso; empresas acompanham apenas os jovens vinculados a elas.
+
+## Áreas da plataforma
+
+- **Visão geral:** indicadores reais e pendências que exigem atenção.
+- **Central de Esteiras:** processos comerciais, recrutamento, admissões, contratos, desligamentos, financeiro e departamento pessoal em quadros Kanban.
+- **Tarefas e Pendências:** responsáveis, prioridades, prazos, vínculos com processos e listas de verificação.
+- **Notificações:** avisos de atribuição e acesso direto ao item relacionado.
+- **Empresas e Jovens:** cadastros, vínculos, acompanhamento e histórico.
+- **Acadêmico:** cursos, aulas, linhas de aprendizagem, atividades, matrículas e progresso.
+- **Gestão:** pessoas, convites, credenciais e auditoria.
 
 ## O que está neste repositório
 
 - `src/app.js`: código-fonte da interface.
 - `dist/`: arquivos estáticos publicados no navegador.
 - `supabase/*.sql`: estrutura do banco, políticas RLS e evoluções do esquema.
+- `supabase/migrations/`: migrações versionadas da operação por esteiras, tarefas e notificações.
 - `supabase/functions/portal-admin/index.ts`: função administrativa protegida por perfil.
 - `vercel.json`: build e roteamento prontos para Vercel.
 
@@ -77,6 +88,8 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 6. `supabase/companies_courses_upgrade.sql`
 7. `supabase/cnpj_alphanumeric.sql`
 8. `supabase/people_audit_learning_paths.sql`
+9. `supabase/migrations/20260909230300_phase_one_operations.sql`
+10. `supabase/migrations/20260909232153_phase_one_foreign_key_indexes.sql`
 
 Revise os scripts antes de aplicá-los a uma base que já possui dados. A base CAFCM atual já recebeu essas evoluções; não execute novamente sem conferir o histórico de migrações.
 

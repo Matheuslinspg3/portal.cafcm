@@ -31,6 +31,15 @@ const state = {
   setupRequired: false,
   people: [],
   importResults: [],
+  selectedPipelineId: null,
+  pipelineSearch: "",
+  pipelinePriority: "",
+  pipelineResponsible: "",
+  pipelineCompany: "",
+  pipelineSort: "recent",
+  taskFilter: "mine",
+  notificationUnreadCount: 0,
+  draggedPipelineItemId: null,
 };
 
 const roleLabels = {
@@ -85,35 +94,66 @@ const auditActionLabels = {
   "activity_attempts.update": "Atividade atualizada",
   "activity_responses.insert": "Resposta registrada",
   "activity_responses.update": "Resposta alterada",
+  "pipelines.insert": "Esteira criada",
+  "pipelines.update": "Esteira alterada",
+  "pipeline_stages.insert": "Etapa criada",
+  "pipeline_stages.update": "Etapa alterada",
+  "pipeline_items.insert": "Processo criado",
+  "pipeline_items.update": "Processo alterado ou movimentado",
+  "pipeline_items.delete": "Processo excluído",
+  "tasks.insert": "Tarefa criada",
+  "tasks.update": "Tarefa alterada",
+  "tasks.delete": "Tarefa excluída",
+  "task_checklist_items.insert": "Item de checklist criado",
+  "task_checklist_items.update": "Checklist de tarefa atualizado",
+  "task_checklist_items.delete": "Item de checklist excluído",
 };
 
 const navigation = {
   cafcm_admin: [
-    ["overview", "Visão geral", "grid"],
-    ["companies", "Empresas", "building"],
-    ["people", "Pessoas e convites", "users"],
-    ["courses", "Cursos", "book"],
-    ["enrollments", "Matrículas", "link"],
-    ["audit", "Auditoria", "history"],
+    { label: "Painel", items: [["overview", "Visão geral", "grid"]] },
+    { label: "Operações", items: [
+      ["pipelines", "Central de Esteiras", "kanban"],
+      ["tasks", "Tarefas e Pendências", "tasks"],
+      ["notifications", "Notificações", "bell"],
+    ] },
+    { label: "Empresas", items: [["companies", "Empresas parceiras", "building"]] },
+    { label: "Jovens", items: [["apprentices", "Jovens / Aprendizes", "users"]] },
+    { label: "Acadêmico", items: [
+      ["courses", "Cursos", "book"],
+      ["enrollments", "Matrículas", "link"],
+    ] },
+    { label: "Gestão", items: [
+      ["people", "Pessoas e Convites", "users"],
+      ["audit", "Auditoria", "history"],
+    ] },
   ],
   apprentice: [
-    ["student-home", "Início", "home"],
-    ["student-courses", "Meus cursos", "book"],
-    ["student-activities", "Atividades", "check"],
+    { label: "Jovem aprendiz", items: [
+      ["student-home", "Início", "home"],
+      ["student-courses", "Meus cursos", "book"],
+      ["student-activities", "Atividades", "check"],
+    ] },
   ],
   company: [
-    ["company-home", "Visão geral", "grid"],
-    ["company-apprentices", "Aprendizes", "users"],
+    { label: "Representante da empresa", items: [
+      ["company-home", "Visão geral", "grid"],
+      ["company-apprentices", "Aprendizes", "users"],
+    ] },
   ],
 };
 
+function navigationItems(role) {
+  return (navigation[role] || []).flatMap((group) => group.items || []);
+}
+
 const wizardContent = {
   cafcm_admin: [
-    ["Comece pelas empresas", "Cadastre identificação, responsável e endereço. Empresas inativas permanecem no histórico, mas não aparecem em novos vínculos."],
-    ["Monte a formação", "Crie o curso, organize cada aula em linhas de aprendizagem — texto, slides, vídeo e considerações — e finalize com atividades."],
-    ["Convide as pessoas", "Escolha o perfil, envie o convite por e-mail e guarde a senha inicial exibida. A equipe CAFCM não precisa de empresa vinculada."],
-    ["Faça as matrículas", "Vincule cada jovem a um curso e publique a formação quando ela estiver pronta."],
-    ["Proteja o histórico", "Use o backup de pessoas e a auditoria. Ao excluir um acesso, o registro fica arquivado para não apagar conclusões e atividades."],
+    ["Acompanhe o que exige ação", "A Visão geral reúne tarefas vencidas, processos atrasados e os principais números da operação."],
+    ["Conduza os processos", "Na Central de Esteiras, selecione a área, crie o processo e mova o cartão conforme o trabalho avança. Cada movimentação fica registrada."],
+    ["Organize as pendências", "Crie tarefas com responsável, prioridade, prazo e checklist. Use os filtros para localizar o que está atrasado, previsto para hoje ou concluído."],
+    ["Mantenha os cadastros únicos", "Empresas e jovens são vinculados aos processos e às tarefas existentes, sem criar cadastros duplicados."],
+    ["Consulte o histórico", "Notificações informam novas atribuições, enquanto a Auditoria preserva as alterações realizadas pela equipe."],
   ],
   apprentice: [
     ["Sua página inicial", "Aqui você encontra somente os cursos em que a CAFCM realizou sua matrícula."],
@@ -160,6 +200,12 @@ const icons = {
   play: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 20"/>',
   presentation: '<path d="M4 3h16v12H4zM8 21l4-6 4 6M2 3h20"/>',
+  kanban: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/>',
+  tasks: '<path d="m4 7 2 2 4-4M4 15l2 2 4-4M13 7h7M13 15h7"/>',
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
+  alert: '<path d="M12 3 2.8 19h18.4z"/><path d="M12 9v4M12 17h.01"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  flag: '<path d="M5 21V4M5 5h11l-2 4 2 4H5"/>',
 };
 
 function icon(name, className = "") {
@@ -282,7 +328,11 @@ function defaultView(role) {
 function viewTitle(view) {
   const titles = {
     overview: ["Visão geral", "Situação real do portal"],
+    pipelines: ["Central de Esteiras", "Processos da operação CAFCM"],
+    tasks: ["Tarefas e Pendências", "Responsáveis, prazos e checklists"],
+    notifications: ["Notificações", "Atualizações direcionadas ao seu acesso"],
     companies: ["Empresas", "Parceiros vinculados aos aprendizes"],
+    apprentices: ["Jovens / Aprendizes", "Cadastro central dos jovens"],
     people: ["Pessoas e convites", "Acessos criados pela CAFCM"],
     courses: ["Cursos", "Formações, aulas e atividades"],
     "course-editor": ["Editor do curso", "Conteúdo pedagógico"],
@@ -507,7 +557,7 @@ async function loadPortal() {
   }
 
   state.profile = profile;
-  state.view = state.view && navigation[profile.role]?.some(([id]) => id === state.view)
+  state.view = state.view && navigationItems(profile.role).some(([id]) => id === state.view)
     ? state.view
     : defaultView(profile.role);
   state.wizardOpen = !profile.onboarding_completed;
@@ -525,6 +575,16 @@ async function renderPortal() {
   const nav = navigation[profile.role] || [];
   const [title, subtitle] = viewTitle(state.view);
   const activeBase = ["course-editor", "lesson-editor"].includes(state.view) ? "courses" : state.view === "student-course" ? "student-courses" : state.view;
+  if (profile.role === "cafcm_admin") {
+    const { count } = await supabase
+      .from("notifications")
+      .select("*", { count: "exact", head: true })
+      .eq("recipient_id", profile.id)
+      .eq("is_read", false);
+    state.notificationUnreadCount = count || 0;
+  } else {
+    state.notificationUnreadCount = 0;
+  }
 
   app.innerHTML = `
     <div class="portal-shell">
@@ -532,8 +592,7 @@ async function renderPortal() {
       <aside class="sidebar">
         <div class="sidebar-head">${brand(true)}<button class="icon-btn sidebar-close" data-close-menu aria-label="Fechar menu">${icon("close")}</button></div>
         <nav aria-label="Navegação principal">
-          <span class="nav-label">${roleLabels[profile.role]}</span>
-          ${nav.map(([id, label, iconName]) => `<button class="nav-item ${activeBase === id ? "active" : ""}" data-nav="${id}">${icon(iconName)}<span>${label}</span></button>`).join("")}
+          ${nav.map((group) => `<section class="nav-group"><span class="nav-label">${escapeHtml(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item ${activeBase === id ? "active" : ""}" data-nav="${id}">${icon(iconName)}<span>${label}</span></button>`).join("")}</section>`).join("")}
         </nav>
         <button class="guide-card" data-open-wizard>${icon("help")}<span><strong>Guia rápido</strong><small>Rever como usar</small></span></button>
         <div class="sidebar-user"><span class="avatar">${escapeHtml(initials(profile.full_name))}</span><span><strong>${escapeHtml(profile.full_name || roleLabels[profile.role])}</strong><small>${roleLabels[profile.role]}</small></span></div>
@@ -542,6 +601,7 @@ async function renderPortal() {
         <header class="topbar">
           <button class="icon-btn menu-button" data-open-menu aria-label="Abrir menu">${icon("menu")}</button>
           <div><strong>${title}</strong><small>${subtitle}</small></div>
+          ${profile.role === "cafcm_admin" ? `<button class="icon-btn notification-button ${state.notificationUnreadCount ? "has-unread" : ""}" data-nav="notifications" aria-label="Notificações${state.notificationUnreadCount ? `: ${state.notificationUnreadCount} não lidas` : ""}">${icon("bell")}${state.notificationUnreadCount ? `<b>${state.notificationUnreadCount > 99 ? "99+" : state.notificationUnreadCount}</b>` : ""}</button>` : ""}
           <button class="btn btn-quiet" data-dialog="my-profile">${icon("users")} <span>Minha conta</span></button>
           <button class="btn btn-quiet help-topbar" data-open-wizard>${icon("help")} <span>Como usar</span></button>
           <button class="icon-btn" data-logout aria-label="Sair do portal">${icon("logout")}</button>
@@ -563,7 +623,11 @@ async function renderView() {
   try {
     const renderers = {
       overview: renderAdminOverview,
+      pipelines: renderPipelines,
+      tasks: renderTasks,
+      notifications: renderNotifications,
       companies: renderCompanies,
+      apprentices: renderApprentices,
       people: renderPeople,
       courses: renderCourses,
       "course-editor": renderCourseEditor,
@@ -601,8 +665,44 @@ function metric(label, value, iconName, note = "") {
 }
 
 function statusBadge(status) {
-  const labels = { draft: "Rascunho", published: "Publicado", archived: "Arquivado", submitted: "Enviada", reviewed: "Revisada" };
+  const labels = {
+    draft: "Rascunho",
+    published: "Publicado",
+    archived: "Arquivado",
+    submitted: "Enviada",
+    reviewed: "Revisada",
+    pending: "Pendente",
+    in_progress: "Em andamento",
+    waiting: "Aguardando terceiro",
+    completed: "Concluída",
+    cancelled: "Cancelada",
+  };
   return `<span class="status status-${status}">${labels[status] || status}</span>`;
+}
+
+const priorityLabels = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
+const priorityOrder = { urgent: 4, high: 3, normal: 2, low: 1 };
+
+function priorityBadge(priority = "normal") {
+  return `<span class="priority priority-${priority}">${priorityLabels[priority] || priority}</span>`;
+}
+
+function isOverdue(value) {
+  if (!value) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.getTime() < Date.now();
+}
+
+function localDayKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dueMarkup(value, closed = false) {
+  if (!value) return `<span class="due-label no-due">${icon("calendar")} Sem prazo</span>`;
+  const overdue = !closed && isOverdue(value);
+  return `<span class="due-label ${overdue ? "overdue" : ""}">${icon(overdue ? "alert" : "calendar")} ${overdue ? "Atrasado · " : ""}${formatDate(value, true)}</span>`;
 }
 
 async function countRows(table, filter) {
@@ -614,35 +714,40 @@ async function countRows(table, filter) {
 }
 
 async function renderAdminOverview(content) {
-  const [companies, apprentices, courses, activities] = await Promise.all([
+  const [companies, apprentices, courses, taskResult, processResult] = await Promise.all([
     countRows("companies", (query) => query.eq("is_active", true)),
     countRows("profiles", (query) => query.eq("role", "apprentice").eq("is_active", true)),
     countRows("courses"),
-    countRows("activities"),
+    supabase.from("tasks").select("id,title,status,priority,due_at").not("status", "in", "(completed,cancelled)").order("due_at", { ascending: true, nullsFirst: false }).limit(250),
+    supabase.from("pipeline_items").select("id,title,pipeline_id,priority,due_at,closed_at").eq("is_archived", false).order("due_at", { ascending: true, nullsFirst: false }).limit(250),
   ]);
+  if (taskResult.error || processResult.error) throw taskResult.error || processResult.error;
+  const openTasks = taskResult.data || [];
+  const openProcesses = (processResult.data || []).filter((item) => !item.closed_at);
+  const attention = [
+    ...openTasks.filter((task) => isOverdue(task.due_at)).map((task) => ({ ...task, kind: "task" })),
+    ...openProcesses.filter((item) => isOverdue(item.due_at)).map((item) => ({ ...item, kind: "process" })),
+  ].sort((first, second) => new Date(first.due_at) - new Date(second.due_at));
 
-  const ready = companies > 0 && courses > 0 && apprentices > 0;
   content.innerHTML = `
-    ${pageHead("Visão geral", "Os números abaixo vêm diretamente dos cadastros do portal.")}
+    ${pageHead("Visão geral", "Acompanhe a operação, identifique atrasos e acesse rapidamente o que precisa de ação.", `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>`)}
     <section class="metric-grid">
       ${metric("Empresas ativas", companies, "building")}
-      ${metric("Jovens convidados", apprentices, "users")}
-      ${metric("Cursos", courses, "book")}
-      ${metric("Atividades", activities, "check")}
+      ${metric("Jovens ativos", apprentices, "users")}
+      ${metric("Processos abertos", openProcesses.length, "kanban")}
+      ${metric("Tarefas pendentes", openTasks.length, "tasks")}
     </section>
-    <section class="split-grid">
-      <article class="card checklist-card">
-        <div class="card-head"><div><span class="eyebrow">Primeiros passos</span><h2>Prepare a operação da CAFCM</h2></div></div>
-        ${checklistItem("Cadastrar uma empresa", companies > 0, "companies")}
-        ${checklistItem("Criar o primeiro curso", courses > 0, "courses")}
-        ${checklistItem("Convidar um jovem", apprentices > 0, "people")}
-        ${checklistItem("Matricular o jovem no curso", ready, "enrollments")}
+    <section class="dashboard-grid">
+      <article class="card attention-card">
+        <div class="card-head"><div><span class="eyebrow">Precisa da sua atenção</span><h2>${attention.length ? `${attention.length} ${attention.length === 1 ? "item atrasado" : "itens atrasados"}` : "Nenhum atraso identificado"}</h2></div>${attention.length ? `<span class="attention-count">${attention.length}</span>` : ""}</div>
+        ${attention.length ? `<div class="attention-list">${attention.slice(0, 8).map((item) => `<button data-nav="${item.kind === "task" ? "tasks" : "pipelines"}"><span class="attention-icon">${icon(item.kind === "task" ? "tasks" : "kanban")}</span><span><strong>${escapeHtml(item.title)}</strong><small>${item.kind === "task" ? "Tarefa" : "Processo"} · prazo em ${formatDate(item.due_at, true)}</small></span>${priorityBadge(item.priority)}</button>`).join("")}</div>` : `<div class="attention-clear">${icon("check")}<div><strong>Rotina em dia</strong><p>Os processos e tarefas com prazo estão dentro do período previsto.</p></div></div>`}
       </article>
-      <article class="card privacy-card">
-        <span class="privacy-icon">${icon("shield")}</span>
-        <h2>Separação de acessos ativa</h2>
-        <p>Jovens acessam apenas as próprias matrículas. Empresas visualizam somente aprendizes vinculados. Respostas das atividades permanecem entre o jovem e a CAFCM.</p>
-        <button class="text-link" data-open-wizard>Rever o guia da plataforma</button>
+      <article class="card quick-actions-card">
+        <div class="card-head"><div><span class="eyebrow">Acesso rápido</span><h2>Rotina CAFCM</h2></div></div>
+        ${checklistItem("Abrir a Central de Esteiras", openProcesses.length > 0, "pipelines")}
+        ${checklistItem("Conferir tarefas e prazos", openTasks.length > 0, "tasks")}
+        ${checklistItem("Gerenciar jovens", apprentices > 0, "apprentices")}
+        ${checklistItem(`Acompanhar ${courses} ${courses === 1 ? "curso" : "cursos"}`, courses > 0, "courses")}
       </article>
     </section>
   `;
@@ -650,6 +755,238 @@ async function renderAdminOverview(content) {
 
 function checklistItem(label, done, destination) {
   return `<button class="checklist-item" data-nav="${destination}"><span class="check-circle ${done ? "done" : ""}">${done ? icon("check") : ""}</span><span>${label}</span>${icon("chevron")}</button>`;
+}
+
+async function loadOperationalReferences() {
+  const [{ data: companies, error: companiesError }, { data: profiles, error: profilesError }] = await Promise.all([
+    supabase.from("companies").select("id,name,is_active").order("is_active", { ascending: false }).order("name"),
+    supabase.from("profiles").select("id,full_name,role,company_id,is_active").order("full_name"),
+  ]);
+  if (companiesError || profilesError) throw companiesError || profilesError;
+  return {
+    companies: companies || [],
+    profiles: profiles || [],
+    apprentices: (profiles || []).filter((profile) => profile.role === "apprentice" && profile.is_active),
+    administrators: (profiles || []).filter((profile) => profile.role === "cafcm_admin" && profile.is_active),
+  };
+}
+
+function filterPipelineItems(items) {
+  const search = state.pipelineSearch.trim().toLocaleLowerCase("pt-BR");
+  return items.filter((item) => {
+    const haystack = [item.title, item.description, item.companyName, item.apprenticeName, item.responsibleName].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
+    return (!search || haystack.includes(search))
+      && (!state.pipelinePriority || item.priority === state.pipelinePriority)
+      && (!state.pipelineResponsible || item.responsible_id === state.pipelineResponsible)
+      && (!state.pipelineCompany || item.company_id === state.pipelineCompany);
+  }).sort((first, second) => {
+    if (state.pipelineSort === "oldest") return new Date(first.created_at) - new Date(second.created_at);
+    if (state.pipelineSort === "due") {
+      const firstDue = first.due_at ? new Date(first.due_at).getTime() : Number.MAX_SAFE_INTEGER;
+      const secondDue = second.due_at ? new Date(second.due_at).getTime() : Number.MAX_SAFE_INTEGER;
+      return firstDue - secondDue;
+    }
+    if (state.pipelineSort === "priority") return (priorityOrder[second.priority] || 0) - (priorityOrder[first.priority] || 0);
+    return new Date(second.last_moved_at) - new Date(first.last_moved_at);
+  });
+}
+
+async function renderPipelines(content) {
+  const [{ data: pipelines, error }, references] = await Promise.all([
+    supabase.from("pipelines").select("*").eq("is_active", true).order("position"),
+    loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  if (!pipelines?.length) {
+    content.innerHTML = `${pageHead("Central de Esteiras", "Acompanhe os processos da operação CAFCM.")}<section class="card">${emptyState("Nenhuma esteira ativa", "Ative ao menos uma esteira para organizar os processos.")}</section>`;
+    return;
+  }
+
+  if (!state.selectedPipelineId || !pipelines.some((pipeline) => pipeline.id === state.selectedPipelineId)) {
+    state.selectedPipelineId = pipelines[0].id;
+  }
+  const selectedPipeline = pipelines.find((pipeline) => pipeline.id === state.selectedPipelineId);
+  const [{ data: stages, error: stagesError }, { data: items, error: itemsError }] = await Promise.all([
+    supabase.from("pipeline_stages").select("*").eq("pipeline_id", state.selectedPipelineId).eq("is_active", true).order("position"),
+    supabase.from("pipeline_items").select("*").eq("pipeline_id", state.selectedPipelineId).eq("is_archived", false).order("position"),
+  ]);
+  if (stagesError || itemsError) throw stagesError || itemsError;
+
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  const profileMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  const enrichedItems = (items || []).map((item) => ({
+    ...item,
+    companyName: companyMap.get(item.company_id) || "",
+    apprenticeName: profileMap.get(item.apprentice_id) || "",
+    responsibleName: profileMap.get(item.responsible_id) || "",
+  }));
+  const visibleItems = filterPipelineItems(enrichedItems);
+  const overdueCount = visibleItems.filter((item) => !item.closed_at && isOverdue(item.due_at)).length;
+  const unassignedCount = visibleItems.filter((item) => !item.responsible_id && !item.closed_at).length;
+  const hasFilters = Boolean(state.pipelineSearch || state.pipelinePriority || state.pipelineResponsible || state.pipelineCompany || state.pipelineSort !== "recent");
+
+  content.innerHTML = `
+    ${pageHead("Central de Esteiras", "Mova cada processo conforme o trabalho avança. A mudança de etapa é registrada automaticamente.", `<button class="btn btn-primary" data-dialog="pipeline-item">${icon("plus")} Novo processo</button>`)}
+    <section class="pipeline-toolbar card">
+      <label class="pipeline-selector"><span>Esteira</span><select data-pipeline-select>${pipelines.map((pipeline) => `<option value="${pipeline.id}" ${pipeline.id === state.selectedPipelineId ? "selected" : ""}>${escapeHtml(pipeline.name)}</option>`).join("")}</select></label>
+      <div class="pipeline-context"><span class="pipeline-color" style="background:${selectedPipeline.color}"></span><div><strong>${escapeHtml(selectedPipeline.name)}</strong><small>${escapeHtml(selectedPipeline.description)}</small></div></div>
+      <div class="pipeline-counters"><span><strong>${visibleItems.length}</strong> exibidos</span><span class="${overdueCount ? "counter-danger" : ""}"><strong>${overdueCount}</strong> atrasados</span><span><strong>${unassignedCount}</strong> sem responsável</span></div>
+    </section>
+    <section class="filter-bar card">
+      <label class="search-field">${icon("search")}<input type="search" data-pipeline-search value="${escapeHtml(state.pipelineSearch)}" placeholder="Buscar processo, empresa ou jovem" aria-label="Buscar processos" /></label>
+      <select data-pipeline-filter="priority" aria-label="Filtrar por prioridade"><option value="">Todas as prioridades</option>${Object.entries(priorityLabels).map(([value, label]) => `<option value="${value}" ${state.pipelinePriority === value ? "selected" : ""}>${label}</option>`).join("")}</select>
+      <select data-pipeline-filter="responsible" aria-label="Filtrar por responsável"><option value="">Todos os responsáveis</option>${references.administrators.map((person) => `<option value="${person.id}" ${state.pipelineResponsible === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select>
+      <select data-pipeline-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.pipelineCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>
+      <select data-pipeline-filter="sort" aria-label="Ordenar processos"><option value="recent" ${state.pipelineSort === "recent" ? "selected" : ""}>Movimentação recente</option><option value="oldest" ${state.pipelineSort === "oldest" ? "selected" : ""}>Mais antigos</option><option value="due" ${state.pipelineSort === "due" ? "selected" : ""}>Prazo mais próximo</option><option value="priority" ${state.pipelineSort === "priority" ? "selected" : ""}>Maior prioridade</option></select>
+      ${hasFilters ? `<button class="btn btn-small btn-quiet" data-clear-pipeline-filters>Limpar filtros</button>` : ""}
+    </section>
+    <section class="kanban-shell" aria-label="Quadro da esteira ${escapeHtml(selectedPipeline.name)}">
+      <div class="kanban-board">
+        ${(stages || []).map((stage) => {
+          const stageItems = visibleItems.filter((item) => item.stage_id === stage.id);
+          return `<section class="kanban-column" data-drop-stage="${stage.id}">
+            <header class="kanban-column-head"><span class="stage-dot" style="background:${stage.color}"></span><strong>${escapeHtml(stage.name)}</strong><b>${stageItems.length}</b></header>
+            <div class="kanban-column-body">
+              ${stageItems.length ? stageItems.map((item) => {
+                const overdue = !stage.is_terminal && isOverdue(item.due_at);
+                return `<article class="kanban-card ${overdue ? "is-overdue" : ""}" draggable="true" data-pipeline-item="${item.id}">
+                  <header><span class="process-kind">${escapeHtml(selectedPipeline.name)}</span><button class="icon-btn" data-edit-pipeline-item="${item.id}" aria-label="Alterar processo">${icon("edit")}</button></header>
+                  <h3>${escapeHtml(item.title)}</h3>
+                  ${item.description ? `<p>${escapeHtml(compactText(item.description, 130))}</p>` : ""}
+                  <div class="process-badges">${priorityBadge(item.priority)}${item.companyName ? `<span>${icon("building")} ${escapeHtml(item.companyName)}</span>` : ""}${item.apprenticeName ? `<span>${icon("users")} ${escapeHtml(item.apprenticeName)}</span>` : ""}</div>
+                  <div class="process-due">${dueMarkup(item.due_at, stage.is_terminal)}</div>
+                  <footer><span class="process-owner">${item.responsibleName ? `<i>${escapeHtml(initials(item.responsibleName))}</i>${escapeHtml(item.responsibleName)}` : "Sem responsável"}</span><small>Movido em ${formatDate(item.last_moved_at, true)}</small></footer>
+                  <label class="mobile-stage-move"><span>Mover para</span><select data-move-process="${item.id}">${(stages || []).map((option) => `<option value="${option.id}" ${option.id === stage.id ? "selected" : ""}>${escapeHtml(option.name)}</option>`).join("")}</select></label>
+                </article>`;
+              }).join("") : `<div class="kanban-empty">Solte um processo nesta etapa</div>`}
+            </div>
+          </section>`;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function taskMatchesFilter(task) {
+  const open = !["completed", "cancelled"].includes(task.status);
+  const dueDay = localDayKey(task.due_at);
+  const today = localDayKey();
+  if (state.taskFilter === "today") return open && dueDay === today;
+  if (state.taskFilter === "overdue") return open && isOverdue(task.due_at);
+  if (state.taskFilter === "upcoming") return open && Boolean(task.due_at) && dueDay > today;
+  if (state.taskFilter === "completed") return task.status === "completed";
+  return open && task.assigned_to === state.profile.id;
+}
+
+async function renderTasks(content) {
+  const [taskResult, checklistResult, pipelineResult, references] = await Promise.all([
+    supabase.from("tasks").select("*").order("created_at", { ascending: false }).limit(500),
+    supabase.from("task_checklist_items").select("*").order("position").limit(1000),
+    supabase.from("pipeline_items").select("id,title").eq("is_archived", false).order("title"),
+    loadOperationalReferences(),
+  ]);
+  if (taskResult.error || checklistResult.error || pipelineResult.error) throw taskResult.error || checklistResult.error || pipelineResult.error;
+  const tasks = taskResult.data || [];
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  const profileMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  const processMap = new Map((pipelineResult.data || []).map((item) => [item.id, item.title]));
+  const checklistByTask = new Map();
+  for (const item of checklistResult.data || []) {
+    if (!checklistByTask.has(item.task_id)) checklistByTask.set(item.task_id, []);
+    checklistByTask.get(item.task_id).push(item);
+  }
+  const counts = {
+    mine: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && task.assigned_to === state.profile.id).length,
+    today: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && localDayKey(task.due_at) === localDayKey()).length,
+    overdue: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && isOverdue(task.due_at)).length,
+    upcoming: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && task.due_at && localDayKey(task.due_at) > localDayKey()).length,
+    completed: tasks.filter((task) => task.status === "completed").length,
+  };
+  const visibleTasks = tasks.filter(taskMatchesFilter).sort((first, second) => {
+    const overdueDifference = Number(isOverdue(second.due_at) && !["completed", "cancelled"].includes(second.status)) - Number(isOverdue(first.due_at) && !["completed", "cancelled"].includes(first.status));
+    if (overdueDifference) return overdueDifference;
+    return (priorityOrder[second.priority] || 0) - (priorityOrder[first.priority] || 0) || new Date(first.due_at || "9999-12-31") - new Date(second.due_at || "9999-12-31");
+  });
+  const filters = [
+    ["mine", "Minhas tarefas"],
+    ["today", "Hoje"],
+    ["overdue", "Atrasadas"],
+    ["upcoming", "Próximas"],
+    ["completed", "Concluídas"],
+  ];
+
+  content.innerHTML = `
+    ${pageHead("Tarefas e Pendências", "Distribua responsabilidades, acompanhe prazos e registre a conclusão de cada etapa.", `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>`)}
+    <div class="task-filter-tabs" role="tablist">${filters.map(([id, label]) => `<button class="${state.taskFilter === id ? "active" : ""}" data-task-filter="${id}" role="tab" aria-selected="${state.taskFilter === id}"><span>${label}</span><b>${counts[id]}</b></button>`).join("")}</div>
+    <section class="task-list">
+      ${visibleTasks.length ? visibleTasks.map((task) => {
+        const checklist = checklistByTask.get(task.id) || [];
+        const completedChecklist = checklist.filter((item) => item.is_completed).length;
+        const closed = ["completed", "cancelled"].includes(task.status);
+        return `<article class="task-card ${!closed && isOverdue(task.due_at) ? "is-overdue" : ""}">
+          <div class="task-status-column">${statusBadge(task.status)}${priorityBadge(task.priority)}</div>
+          <div class="task-main">
+            <div class="task-title-row"><div><span class="task-category">${escapeHtml(task.category || "Sem categoria")}</span><h2>${escapeHtml(task.title)}</h2></div><button class="icon-btn" data-edit-task="${task.id}" aria-label="Alterar tarefa">${icon("edit")}</button></div>
+            ${task.description ? `<p>${escapeHtml(task.description)}</p>` : ""}
+            <div class="task-relations">${task.company_id ? `<span>${icon("building")} ${escapeHtml(companyMap.get(task.company_id) || "Empresa vinculada")}</span>` : ""}${task.apprentice_id ? `<span>${icon("users")} ${escapeHtml(profileMap.get(task.apprentice_id) || "Jovem vinculado")}</span>` : ""}${task.pipeline_item_id ? `<span>${icon("kanban")} ${escapeHtml(processMap.get(task.pipeline_item_id) || "Processo vinculado")}</span>` : ""}</div>
+            ${checklist.length ? `<div class="task-checklist"><div class="task-checklist-head"><strong>Checklist</strong><small>${completedChecklist}/${checklist.length} concluídos</small></div>${checklist.map((item) => `<button class="task-check-item ${item.is_completed ? "complete" : ""}" data-toggle-checklist="${item.id}" data-checklist-complete="${item.is_completed}"><span>${item.is_completed ? icon("check") : ""}</span><em>${escapeHtml(item.title)}</em></button>`).join("")}</div>` : ""}
+          </div>
+          <aside class="task-side"><div><small>Responsável</small><strong>${escapeHtml(profileMap.get(task.assigned_to) || "Sem responsável")}</strong></div>${dueMarkup(task.due_at, closed)}<button class="btn btn-small ${task.status === "completed" ? "btn-secondary" : "btn-primary"}" data-task-status="${task.id}" data-next-status="${task.status === "completed" ? "pending" : "completed"}">${task.status === "completed" ? "Reabrir" : "Concluir"}</button></aside>
+        </article>`;
+      }).join("") : `<section class="card">${emptyState("Nenhuma tarefa nesta visão", state.taskFilter === "mine" ? "As tarefas atribuídas a você aparecerão aqui." : "Não há tarefas que correspondam a este filtro.", `<button class="btn btn-primary" data-dialog="task">Criar tarefa</button>`)}</section>`}
+    </section>
+  `;
+}
+
+async function renderNotifications(content) {
+  const { data, error } = await supabase.from("notifications").select("*").eq("recipient_id", state.profile.id).order("created_at", { ascending: false }).limit(200);
+  if (error) throw error;
+  const unread = (data || []).filter((item) => !item.is_read).length;
+  state.notificationUnreadCount = unread;
+  content.innerHTML = `
+    ${pageHead("Notificações", "Consulte novas atribuições e atualizações direcionadas ao seu acesso.", unread ? `<button class="btn btn-secondary" data-read-all-notifications>${icon("check")} Marcar todas como lidas</button>` : "")}
+    <section class="notification-summary">${metric("Não lidas", unread, "bell")}${metric("Total exibido", (data || []).length, "history")}</section>
+    <section class="card notification-list">
+      ${(data || []).length ? data.map((item) => `<article class="notification-row ${item.is_read ? "" : "unread"}">
+        <span class="notification-symbol notification-${item.kind}">${icon(item.kind === "urgent" || item.kind === "attention" ? "alert" : item.kind === "task" ? "tasks" : "bell")}</span>
+        <div><div class="notification-title"><strong>${escapeHtml(item.title)}</strong>${item.is_read ? "" : `<span>Nova</span>`}</div><p>${escapeHtml(item.message)}</p><small>${formatDate(item.created_at, true)}</small></div>
+        <div class="notification-actions">${item.entity_type === "task" ? `<button class="btn btn-small btn-secondary" data-open-notification="${item.id}" data-notification-target="tasks">Abrir tarefa</button>` : item.entity_type === "pipeline_item" ? `<button class="btn btn-small btn-secondary" data-open-notification="${item.id}" data-notification-target="pipelines">Abrir processo</button>` : ""}${!item.is_read ? `<button class="text-link" data-read-notification="${item.id}">Marcar como lida</button>` : ""}</div>
+      </article>`).join("") : emptyState("Nenhuma notificação", "As novas atribuições de tarefas aparecerão aqui.")}
+    </section>
+  `;
+}
+
+async function renderApprentices(content) {
+  const [peopleResult, references, enrollmentResult, progressResult, attemptResult] = await Promise.all([
+    callAdmin({ action: "list_users" }, true),
+    loadOperationalReferences(),
+    supabase.from("enrollments").select("apprentice_id,course_id"),
+    supabase.from("lesson_progress").select("apprentice_id,lesson_id"),
+    supabase.from("activity_attempts").select("apprentice_id,activity_id,status"),
+  ]);
+  if (enrollmentResult.error || progressResult.error || attemptResult.error) throw enrollmentResult.error || progressResult.error || attemptResult.error;
+  state.people = peopleResult.users || [];
+  const apprentices = state.people.filter((person) => person.role === "apprentice");
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  const countBy = (rows, key) => rows.reduce((map, item) => map.set(item[key], (map.get(item[key]) || 0) + 1), new Map());
+  const enrollmentCount = countBy(enrollmentResult.data || [], "apprentice_id");
+  const progressCount = countBy(progressResult.data || [], "apprentice_id");
+  const attemptCount = countBy(attemptResult.data || [], "apprentice_id");
+  const activeCount = apprentices.filter((person) => person.isActive).length;
+
+  content.innerHTML = `
+    ${pageHead("Jovens / Aprendizes", "Use o cadastro central do jovem em cursos, empresas, processos e tarefas, sem duplicar informações.", `<button class="btn btn-primary" data-dialog="invite">${icon("plus")} Cadastrar jovem</button>`)}
+    <section class="people-summary"><span><strong>${apprentices.length}</strong> jovens cadastrados</span><span><strong>${activeCount}</strong> ativos</span><span><strong>${apprentices.length - activeCount}</strong> arquivados</span></section>
+    <section class="card">
+      ${apprentices.length ? `<div class="people-list">${apprentices.map((person) => `<article class="person-row apprentice-row">
+        <span class="avatar">${escapeHtml(initials(person.fullName))}</span>
+        <div class="person-main"><strong>${escapeHtml(person.fullName || "Nome não informado")}</strong><small>${escapeHtml(person.email || "E-mail não disponível")}</small><small>${escapeHtml(person.companyId ? companyMap.get(person.companyId) || "Empresa vinculada" : "Sem empresa vinculada")}</small></div>
+        <div class="person-access"><span class="status ${person.isActive ? "status-published" : "status-archived"}">${person.isActive ? "Ativo" : "Arquivado"}</span></div>
+        <div class="apprentice-metrics"><span><strong>${enrollmentCount.get(person.id) || 0}</strong> cursos</span><span><strong>${progressCount.get(person.id) || 0}</strong> aulas concluídas</span><span><strong>${attemptCount.get(person.id) || 0}</strong> atividades</span></div>
+        <div class="person-actions"><button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} Histórico</button>${person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Alterar</button>` : ""}</div>
+      </article>`).join("")}</div>` : emptyState("Nenhum jovem cadastrado", "Cadastre o primeiro jovem para vinculá-lo à empresa, aos cursos e aos processos.", `<button class="btn btn-primary" data-dialog="invite">Cadastrar jovem</button>`)}
+    </section>
+  `;
 }
 
 async function renderCompanies(content) {
@@ -1339,7 +1676,12 @@ async function openDialog(type, recordId = null) {
   }
 
   if (type === "person-history") {
-    const person = state.people.find((item) => item.id === recordId);
+    let person = state.people.find((item) => item.id === recordId);
+    if (!person) {
+      const result = await callAdmin({ action: "list_users" }, true);
+      state.people = result.users || [];
+      person = state.people.find((item) => item.id === recordId);
+    }
     if (!person) throw new Error("A pessoa selecionada não foi encontrada.");
     const history = await callAdmin({ action: "person_history", userId: recordId }, true);
     body = `<div class="person-history">
@@ -1397,6 +1739,89 @@ async function openDialog(type, recordId = null) {
       <label class="confirmation-field"><input name="confirmImport" type="checkbox" value="yes" required /><span>Confirmo o envio de convites por e-mail para pessoas novas do arquivo.</span></label>
       <div class="form-note">Perfis existentes mantêm suas matrículas e conclusões. Senhas não são exportadas em backups.</div>
       <button class="btn btn-primary" type="submit">Validar e importar pessoas</button>
+    </form>`;
+  }
+
+  if (type === "pipeline-item") {
+    if (!state.selectedPipelineId) throw new Error("Selecione uma esteira antes de criar um processo.");
+    const [pipelineResult, stagesResult, references] = await Promise.all([
+      supabase.from("pipelines").select("id,name").eq("id", state.selectedPipelineId).single(),
+      supabase.from("pipeline_stages").select("*").eq("pipeline_id", state.selectedPipelineId).eq("is_active", true).order("position"),
+      loadOperationalReferences(),
+    ]);
+    if (pipelineResult.error || stagesResult.error) throw pipelineResult.error || stagesResult.error;
+    let process = {};
+    let movements = [];
+    if (recordId) {
+      const [processResult, movementResult] = await Promise.all([
+        supabase.from("pipeline_items").select("*").eq("id", recordId).eq("pipeline_id", state.selectedPipelineId).single(),
+        supabase.from("pipeline_item_movements").select("*").eq("pipeline_item_id", recordId).order("moved_at", { ascending: false }).limit(20),
+      ]);
+      if (processResult.error || movementResult.error) throw processResult.error || movementResult.error;
+      process = processResult.data;
+      movements = movementResult.data || [];
+    }
+    const stages = stagesResult.data || [];
+    if (!stages.length) throw new Error("Esta esteira não possui etapas ativas.");
+    const stageMap = new Map(stages.map((stage) => [stage.id, stage.name]));
+    const profileMap = new Map(references.profiles.map((profile) => [profile.id, profile.full_name]));
+    body = `<form id="pipeline-item-form" class="dialog-form wide-form">
+      <input type="hidden" name="processId" value="${escapeHtml(process.id || "")}" />
+      <input type="hidden" name="pipelineId" value="${escapeHtml(state.selectedPipelineId)}" />
+      <div class="form-section"><span>${escapeHtml(pipelineResult.data.name)}</span></div>
+      <label>Título do processo<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(process.title || "")}" /></label>
+      <label>Descrição<textarea name="description" rows="5" maxlength="12000" placeholder="Registre o contexto e a próxima providência">${escapeHtml(process.description || "")}</textarea></label>
+      <div class="form-grid two-columns">
+        <label>Etapa<select name="stageId" required>${stages.map((stage) => `<option value="${stage.id}" ${process.stage_id === stage.id ? "selected" : ""}>${escapeHtml(stage.name)}</option>`).join("")}</select></label>
+        <label>Prioridade<select name="priority" required>${Object.entries(priorityLabels).map(([value, label]) => `<option value="${value}" ${(process.priority || "normal") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <label>Responsável CAFCM<select name="responsibleId"><option value="">Sem responsável</option>${references.administrators.map((person) => `<option value="${person.id}" ${process.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
+        <label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(process.due_at)}" /></label>
+        <label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${process.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " · inativa"}</option>`).join("")}</select></label>
+        <label>Jovem / aprendiz<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((person) => `<option value="${person.id}" ${process.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
+      </div>
+      <p class="form-note">Use o mesmo cadastro de empresa e de jovem em toda a operação. Mudanças de etapa ficam registradas na auditoria e no histórico do processo.</p>
+      <div class="dialog-form-actions">${recordId ? `<button class="btn btn-danger-soft" type="button" data-archive-pipeline-item="${recordId}" data-process-title="${escapeHtml(process.title)}">Arquivar processo</button>` : ""}<button class="btn btn-primary" type="submit">${recordId ? "Salvar alterações" : "Criar processo"}</button></div>
+    </form>
+    ${recordId ? `<section class="movement-history"><div class="form-section"><span>Histórico de movimentações</span></div>${movements.length ? movements.map((movement) => `<article><span>${icon("arrow")}</span><div><strong>${escapeHtml(stageMap.get(movement.from_stage_id) || "Etapa anterior")} → ${escapeHtml(stageMap.get(movement.to_stage_id) || "Nova etapa")}</strong><small>${escapeHtml(profileMap.get(movement.moved_by) || "Sistema")} · ${formatDate(movement.moved_at, true)}</small></div></article>`).join("") : `<p class="muted-note">O processo ainda não foi movido entre etapas.</p>`}</section>` : ""}`;
+  }
+
+  if (type === "task") {
+    const [references, processResult] = await Promise.all([
+      loadOperationalReferences(),
+      supabase.from("pipeline_items").select("id,title,pipeline_id").eq("is_archived", false).order("title"),
+    ]);
+    if (processResult.error) throw processResult.error;
+    let task = {};
+    if (recordId) {
+      const { data, error } = await supabase.from("tasks").select("*").eq("id", recordId).single();
+      if (error) throw error;
+      task = data;
+    }
+    const statusOptions = [
+      ["pending", "Pendente"],
+      ["in_progress", "Em andamento"],
+      ["waiting", "Aguardando terceiro"],
+      ["completed", "Concluída"],
+      ["cancelled", "Cancelada"],
+    ];
+    const categories = ["Admissão", "Desligamento", "Financeiro", "DP", "Recrutamento", "Empresas", "Acadêmico"];
+    body = `<form id="task-form" class="dialog-form wide-form">
+      <input type="hidden" name="taskId" value="${escapeHtml(task.id || "")}" />
+      <label>Título da tarefa<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(task.title || "")}" /></label>
+      <label>Descrição<textarea name="description" rows="5" maxlength="12000" placeholder="Informe o que precisa ser feito e o resultado esperado">${escapeHtml(task.description || "")}</textarea></label>
+      <div class="form-grid two-columns">
+        <label>Status<select name="status" required>${statusOptions.map(([value, label]) => `<option value="${value}" ${(task.status || "pending") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <label>Prioridade<select name="priority" required>${Object.entries(priorityLabels).map(([value, label]) => `<option value="${value}" ${(task.priority || "normal") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <label>Categoria<input name="category" list="task-categories" maxlength="100" value="${escapeHtml(task.category || "")}" placeholder="Selecione ou informe a categoria" /><datalist id="task-categories">${categories.map((category) => `<option value="${category}"></option>`).join("")}</datalist></label>
+        <label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(task.due_at)}" /></label>
+        <label>Responsável<select name="assignedTo"><option value="">Sem responsável</option>${references.administrators.map((person) => `<option value="${person.id}" ${(task.assigned_to || (!recordId ? state.profile.id : "")) === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
+        <label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${task.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " · inativa"}</option>`).join("")}</select></label>
+        <label>Jovem / aprendiz<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((person) => `<option value="${person.id}" ${task.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
+        <label>Processo relacionado<select name="processId"><option value="">Sem processo vinculado</option>${(processResult.data || []).map((process) => `<option value="${process.id}" ${task.pipeline_item_id === process.id ? "selected" : ""}>${escapeHtml(process.title)}</option>`).join("")}</select></label>
+      </div>
+      <label>${recordId ? "Adicionar itens ao checklist" : "Checklist inicial"}<textarea name="checklistItems" rows="4" maxlength="5000" placeholder="Um item por linha"></textarea><small>${recordId ? "Os novos itens serão acrescentados aos já existentes." : "Opcional. Escreva um item por linha."}</small></label>
+      <p class="form-note">A pessoa responsável recebe uma notificação interna quando a tarefa é atribuída ou transferida.</p>
+      <button class="btn btn-primary" type="submit">${recordId ? "Salvar tarefa" : "Criar tarefa"}</button>
     </form>`;
   }
 
@@ -1479,6 +1904,8 @@ async function openDialog(type, recordId = null) {
     person: "Alterar dados da pessoa",
     "person-history": "Histórico da pessoa",
     "people-import": "Importar pessoas",
+    "pipeline-item": recordId ? "Alterar processo" : "Novo processo",
+    task: recordId ? "Alterar tarefa" : "Nova tarefa",
     course: recordId ? "Alterar curso" : "Criar curso",
     invite: "Criar pessoa e enviar convite",
     lesson: recordId ? "Alterar aula" : "Adicionar aula",
@@ -1487,7 +1914,7 @@ async function openDialog(type, recordId = null) {
     enrollment: "Nova matrícula",
     response: "Responder atividade",
   };
-  const wideDialog = ["company", "block", "person-history", "people-import"].includes(type);
+  const wideDialog = ["company", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
   root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>${body}</section></div>`;
 }
 
@@ -1648,6 +2075,31 @@ async function navigate(view) {
   await renderPortal();
 }
 
+async function movePipelineItem(itemId, stageId) {
+  const [{ data: item, error: itemError }, { data: stage, error: stageError }] = await Promise.all([
+    supabase.from("pipeline_items").select("id,pipeline_id,stage_id,title").eq("id", itemId).single(),
+    supabase.from("pipeline_stages").select("id,pipeline_id,name").eq("id", stageId).single(),
+  ]);
+  if (itemError || stageError) throw itemError || stageError;
+  if (item.pipeline_id !== stage.pipeline_id) throw new Error("A etapa selecionada não pertence à esteira deste processo.");
+  if (item.stage_id === stage.id) return false;
+  const { data: lastItems, error: positionError } = await supabase
+    .from("pipeline_items")
+    .select("position")
+    .eq("pipeline_id", item.pipeline_id)
+    .eq("stage_id", stage.id)
+    .eq("is_archived", false)
+    .order("position", { ascending: false })
+    .limit(1);
+  if (positionError) throw positionError;
+  const position = (lastItems?.[0]?.position || 0) + 1000;
+  const { error } = await supabase.from("pipeline_items").update({ stage_id: stage.id, position }).eq("id", item.id);
+  if (error) throw error;
+  showToast(`Processo movido para ${stage.name}.`);
+  await renderView();
+  return true;
+}
+
 app.addEventListener("click", async (event) => {
   const target = event.target.closest("button, [data-nav]");
   if (!target) return;
@@ -1690,6 +2142,57 @@ app.addEventListener("click", async (event) => {
     return showToast("Guia concluído. Você pode revê-lo a qualquer momento.");
   }
   if (target.dataset.dialog) return openDialog(target.dataset.dialog);
+  if (target.dataset.taskFilter) {
+    state.taskFilter = target.dataset.taskFilter;
+    return renderView();
+  }
+  if (target.hasAttribute("data-clear-pipeline-filters")) {
+    state.pipelineSearch = "";
+    state.pipelinePriority = "";
+    state.pipelineResponsible = "";
+    state.pipelineCompany = "";
+    state.pipelineSort = "recent";
+    return renderView();
+  }
+  if (target.dataset.editPipelineItem) return openDialog("pipeline-item", target.dataset.editPipelineItem);
+  if (target.dataset.archivePipelineItem) {
+    if (!window.confirm(`Arquivar o processo “${target.dataset.processTitle}”? O histórico de movimentações e auditoria será preservado.`)) return;
+    const { error } = await supabase.from("pipeline_items").update({ is_archived: true, archived_at: new Date().toISOString() }).eq("id", target.dataset.archivePipelineItem);
+    if (error) return showToast(friendlyError(error), "error");
+    closeOverlay();
+    showToast("Processo arquivado com o histórico preservado.");
+    return renderView();
+  }
+  if (target.dataset.editTask) return openDialog("task", target.dataset.editTask);
+  if (target.dataset.taskStatus) {
+    const { error } = await supabase.from("tasks").update({ status: target.dataset.nextStatus }).eq("id", target.dataset.taskStatus);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast(target.dataset.nextStatus === "completed" ? "Tarefa concluída." : "Tarefa reaberta.");
+    return renderView();
+  }
+  if (target.dataset.toggleChecklist) {
+    const complete = target.dataset.checklistComplete !== "true";
+    const { error } = await supabase.from("task_checklist_items").update({ is_completed: complete }).eq("id", target.dataset.toggleChecklist);
+    if (error) return showToast(friendlyError(error), "error");
+    return renderView();
+  }
+  if (target.dataset.readNotification) {
+    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("id", target.dataset.readNotification);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Notificação marcada como lida.");
+    return renderPortal();
+  }
+  if (target.hasAttribute("data-read-all-notifications")) {
+    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("recipient_id", state.profile.id).eq("is_read", false);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Todas as notificações foram marcadas como lidas.");
+    return renderPortal();
+  }
+  if (target.dataset.openNotification) {
+    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("id", target.dataset.openNotification);
+    if (error) return showToast(friendlyError(error), "error");
+    return navigate(target.dataset.notificationTarget || "notifications");
+  }
   if (target.dataset.editCompany) return openDialog("company", target.dataset.editCompany);
   if (target.dataset.editPerson) return openDialog("person", target.dataset.editPerson);
   if (target.dataset.personHistory) return openDialog("person-history", target.dataset.personHistory);
@@ -1961,6 +2464,37 @@ app.addEventListener("click", async (event) => {
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.matches("[data-pipeline-select]")) {
+    state.selectedPipelineId = event.target.value;
+    state.pipelineSearch = "";
+    state.pipelinePriority = "";
+    state.pipelineResponsible = "";
+    state.pipelineCompany = "";
+    state.pipelineSort = "recent";
+    return renderView();
+  }
+
+  if (event.target.matches("[data-pipeline-filter]")) {
+    const stateKeys = {
+      priority: "pipelinePriority",
+      responsible: "pipelineResponsible",
+      company: "pipelineCompany",
+      sort: "pipelineSort",
+    };
+    const stateKey = stateKeys[event.target.dataset.pipelineFilter];
+    if (stateKey) state[stateKey] = event.target.value;
+    return renderView();
+  }
+
+  if (event.target.matches("[data-move-process]")) {
+    const select = event.target;
+    select.disabled = true;
+    return movePipelineItem(select.dataset.moveProcess, select.value).catch((error) => {
+      showToast(friendlyError(error), "error");
+      return renderView();
+    });
+  }
+
   if (event.target.name === "role") {
     const companyField = document.querySelector(".company-field");
     if (!companyField) return;
@@ -1988,6 +2522,57 @@ app.addEventListener("change", (event) => {
       input.required = manual;
       if (!manual) input.value = "";
     }
+  }
+});
+
+app.addEventListener("input", (event) => {
+  if (!event.target.matches("[data-pipeline-search]")) return;
+  state.pipelineSearch = event.target.value;
+  window.clearTimeout(app.pipelineSearchTimer);
+  app.pipelineSearchTimer = window.setTimeout(() => renderView(), 250);
+});
+
+app.addEventListener("dragstart", (event) => {
+  const card = event.target.closest("[data-pipeline-item]");
+  if (!card) return;
+  state.draggedPipelineItemId = card.dataset.pipelineItem;
+  card.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", state.draggedPipelineItemId);
+});
+
+app.addEventListener("dragend", (event) => {
+  event.target.closest("[data-pipeline-item]")?.classList.remove("dragging");
+  document.querySelectorAll(".kanban-column.drag-over").forEach((column) => column.classList.remove("drag-over"));
+  state.draggedPipelineItemId = null;
+});
+
+app.addEventListener("dragover", (event) => {
+  const column = event.target.closest("[data-drop-stage]");
+  if (!column || !state.draggedPipelineItemId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  document.querySelectorAll(".kanban-column.drag-over").forEach((item) => item !== column && item.classList.remove("drag-over"));
+  column.classList.add("drag-over");
+});
+
+app.addEventListener("dragleave", (event) => {
+  const column = event.target.closest("[data-drop-stage]");
+  if (column && !column.contains(event.relatedTarget)) column.classList.remove("drag-over");
+});
+
+app.addEventListener("drop", async (event) => {
+  const column = event.target.closest("[data-drop-stage]");
+  if (!column) return;
+  event.preventDefault();
+  column.classList.remove("drag-over");
+  const itemId = event.dataTransfer.getData("text/plain") || state.draggedPipelineItemId;
+  if (!itemId) return;
+  try {
+    await movePipelineItem(itemId, column.dataset.dropStage);
+  } catch (error) {
+    showToast(friendlyError(error), "error");
+    await renderView();
   }
 });
 
@@ -2153,6 +2738,94 @@ app.addEventListener("submit", async (event) => {
       await renderView();
       renderImportResults(result);
       return;
+    }
+
+    if (form.id === "pipeline-item-form") {
+      const processId = String(values.processId || "");
+      const pipelineId = String(values.pipelineId || "");
+      const stageId = String(values.stageId || "");
+      if (!pipelineId || !stageId) throw new Error("Selecione a esteira e a etapa do processo.");
+      const dueAt = values.dueAt ? new Date(String(values.dueAt)).toISOString() : null;
+      const payload = {
+        pipeline_id: pipelineId,
+        stage_id: stageId,
+        title: String(values.title || "").trim(),
+        description: String(values.description || "").trim(),
+        company_id: values.companyId || null,
+        apprentice_id: values.apprenticeId || null,
+        responsible_id: values.responsibleId || null,
+        priority: String(values.priority || "normal"),
+        due_at: dueAt,
+      };
+      let shouldReposition = !processId;
+      if (processId) {
+        const { data: current, error: currentError } = await supabase.from("pipeline_items").select("stage_id").eq("id", processId).single();
+        if (currentError) throw currentError;
+        shouldReposition = current.stage_id !== stageId;
+      }
+      if (shouldReposition) {
+        const { data: lastItems, error: positionError } = await supabase
+          .from("pipeline_items")
+          .select("position")
+          .eq("pipeline_id", pipelineId)
+          .eq("stage_id", stageId)
+          .eq("is_archived", false)
+          .order("position", { ascending: false })
+          .limit(1);
+        if (positionError) throw positionError;
+        payload.position = (lastItems?.[0]?.position || 0) + 1000;
+      }
+      const query = processId
+        ? supabase.from("pipeline_items").update(payload).eq("id", processId)
+        : supabase.from("pipeline_items").insert({ ...payload, created_by: state.profile.id });
+      const { error } = await query;
+      if (error) throw error;
+      closeOverlay();
+      showToast(processId ? "Processo atualizado." : "Processo criado na esteira.");
+      return renderView();
+    }
+
+    if (form.id === "task-form") {
+      const taskId = String(values.taskId || "");
+      const dueAt = values.dueAt ? new Date(String(values.dueAt)).toISOString() : null;
+      const payload = {
+        title: String(values.title || "").trim(),
+        description: String(values.description || "").trim(),
+        status: String(values.status || "pending"),
+        priority: String(values.priority || "normal"),
+        category: String(values.category || "").trim(),
+        company_id: values.companyId || null,
+        apprentice_id: values.apprenticeId || null,
+        pipeline_item_id: values.processId || null,
+        assigned_to: values.assignedTo || null,
+        due_at: dueAt,
+      };
+      let savedTaskId = taskId;
+      if (taskId) {
+        const { error } = await supabase.from("tasks").update(payload).eq("id", taskId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from("tasks").insert({ ...payload, created_by: state.profile.id }).select("id").single();
+        if (error) throw error;
+        savedTaskId = data.id;
+      }
+      const checklistLines = String(values.checklistItems || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (checklistLines.length > 50) throw new Error("Adicione no máximo 50 itens de checklist por vez.");
+      if (checklistLines.length) {
+        const { data: lastItems, error: positionError } = await supabase.from("task_checklist_items").select("position").eq("task_id", savedTaskId).order("position", { ascending: false }).limit(1);
+        if (positionError) throw positionError;
+        const initialPosition = lastItems?.[0]?.position || 0;
+        const { error: checklistError } = await supabase.from("task_checklist_items").insert(checklistLines.map((title, index) => ({ task_id: savedTaskId, title, position: initialPosition + index + 1 })));
+        if (checklistError) {
+          closeOverlay();
+          await renderView();
+          showToast("A tarefa foi salva, mas o checklist não pôde ser incluído. Abra a tarefa e tente novamente.", "error");
+          return;
+        }
+      }
+      closeOverlay();
+      showToast(taskId ? "Tarefa atualizada." : "Tarefa criada.");
+      return renderView();
     }
 
     if (form.id === "course-form") {
