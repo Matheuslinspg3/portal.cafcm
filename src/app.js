@@ -118,12 +118,20 @@ const navigation = {
       ["notifications", "Notificações", "bell"],
     ] },
     { label: "Empresas", items: [["companies", "Empresas parceiras", "building"]] },
-    { label: "Jovens", items: [["apprentices", "Jovens / Aprendizes", "users"]] },
+    { label: "Jovens", items: [
+      ["apprentices", "Jovens / Aprendizes", "users"],
+      ["admissions", "Admissões", "tasks"],
+      ["contracts", "Contratos", "calendar"],
+      ["leaves", "Férias e afastamentos", "history"],
+      ["terminations", "Desligamentos", "alert"],
+    ] },
     { label: "Acadêmico", items: [
       ["courses", "Cursos", "book"],
       ["enrollments", "Matrículas", "link"],
     ] },
     { label: "Gestão", items: [
+      ["documents", "Documentos", "upload"],
+      ["accounting", "Contabilidade", "mail"],
       ["people", "Pessoas e Convites", "users"],
       ["audit", "Auditoria", "history"],
     ] },
@@ -333,6 +341,12 @@ function viewTitle(view) {
     notifications: ["Notificações", "Atualizações direcionadas ao seu acesso"],
     companies: ["Empresas", "Parceiros vinculados aos aprendizes"],
     apprentices: ["Jovens / Aprendizes", "Cadastro central dos jovens"],
+    admissions: ["Admissões", "Documentos, contratos e início do jovem"],
+    contracts: ["Contratos", "Vigência, vencimentos e vínculos"],
+    leaves: ["Férias e afastamentos", "Controle de datas e providências"],
+    terminations: ["Desligamentos", "Processos, documentos e histórico"],
+    documents: ["Documentos", "Arquivo digital privado da CAFCM"],
+    accounting: ["Contabilidade", "Envios, retornos e conferência"],
     people: ["Pessoas e convites", "Acessos criados pela CAFCM"],
     courses: ["Cursos", "Formações, aulas e atividades"],
     "course-editor": ["Editor do curso", "Conteúdo pedagógico"],
@@ -642,6 +656,12 @@ async function renderView() {
       notifications: renderNotifications,
       companies: renderCompanies,
       apprentices: renderApprentices,
+      admissions: renderAdmissions,
+      contracts: renderContracts,
+      leaves: renderLeaves,
+      terminations: renderTerminations,
+      documents: renderDocuments,
+      accounting: renderAccounting,
       people: renderPeople,
       courses: renderCourses,
       "course-editor": renderCourseEditor,
@@ -1042,6 +1062,87 @@ async function renderCompanies(content) {
       }).join("")}
     </section>` : `<section class="card">${emptyState("Nenhuma empresa cadastrada", "Cadastre a primeira empresa para depois vincular seus representantes e aprendizes.", `<button class="btn btn-primary" data-dialog="company">Cadastrar empresa</button>`)}</section>`}
   `;
+}
+
+function operationalRow(title, detail, status, actions = "") {
+  return `<article class="person-row"><span class="avatar">${icon("tasks")}</span><div class="person-main"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail || "Sem informações adicionais")}</small></div><div class="person-access">${status ? `<span class="status status-draft">${escapeHtml(status)}</span>` : ""}</div><div class="person-actions">${actions}</div></article>`;
+}
+
+async function renderAdmissions(content) {
+  const [{ data: admissions, error }, references, { data: checklist }] = await Promise.all([
+    supabase.from("admission_cases").select("*").order("created_at", { ascending: false }),
+    loadOperationalReferences(),
+    supabase.from("admission_checklist_items").select("admission_id,is_required,is_completed"),
+  ]);
+  if (error) throw error;
+  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  const checklistMap = new Map();
+  for (const item of checklist || []) {
+    const current = checklistMap.get(item.admission_id) || { required: 0, complete: 0 };
+    current.required += item.is_required ? 1 : 0;
+    current.complete += item.is_required && item.is_completed ? 1 : 0;
+    checklistMap.set(item.admission_id, current);
+  }
+  content.innerHTML = `${pageHead("Admissões", "Abra o processo uma vez e acompanhe documentos, exame, contrato, matrícula e contabilidade.", `<button class="btn btn-primary" data-dialog="admission">${icon("plus")} Nova admissão</button>`)}
+    <section class="card"><div class="people-list">${(admissions || []).length ? admissions.map((item) => {
+      const count = checklistMap.get(item.id) || { required: 0, complete: 0 };
+      const detail = `${companyMap.get(item.company_id) || "Empresa não informada"} · início previsto ${item.target_start_date ? formatDate(item.target_start_date) : "não definido"} · checklist ${count.complete}/${count.required}`;
+      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, item.status, `<button class="btn btn-small btn-secondary" data-edit-admission="${item.id}">${icon("edit")} Abrir</button>`);
+    }).join("") : emptyState("Nenhuma admissão aberta", "Crie a primeira admissão para gerar o checklist operacional e acompanhar cada etapa.", `<button class="btn btn-primary" data-dialog="admission">Nova admissão</button>`)}</div></section>`;
+}
+
+async function renderContracts(content) {
+  const [{ data: contracts, error }, references] = await Promise.all([
+    supabase.from("contracts").select("*").order("end_date"), loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  content.innerHTML = `${pageHead("Contratos", "Acompanhe vigência e organize os próximos encerramentos.", `<button class="btn btn-primary" data-dialog="contract">${icon("plus")} Novo contrato</button>`)}
+    <section class="card"><div class="people-list">${(contracts || []).length ? contracts.map((item) => {
+      const endsSoon = item.status === "active" && item.end_date && new Date(`${item.end_date}T23:59:59`).getTime() - Date.now() <= 30 * 86400000;
+      const detail = `${companyMap.get(item.company_id) || "Empresa não informada"} · ${formatDate(item.start_date)} a ${formatDate(item.end_date)}${item.position_title ? ` · ${item.position_title}` : ""}`;
+      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, endsSoon ? "Vence em até 30 dias" : item.status, `<button class="btn btn-small btn-secondary" data-edit-contract="${item.id}">${icon("edit")} Alterar</button>`);
+    }).join("") : emptyState("Nenhum contrato cadastrado", "Registre o contrato para o Portal avisar sobre a vigência e concentrar os documentos.", `<button class="btn btn-primary" data-dialog="contract">Cadastrar contrato</button>`)}</div></section>`;
+}
+
+async function renderLeaves(content) {
+  const [{ data: records, error }, references] = await Promise.all([
+    supabase.from("leave_records").select("*").order("start_date"), loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  content.innerHTML = `${pageHead("Férias e afastamentos", "Registre períodos e mantenha as providências visíveis para a equipe.", `<button class="btn btn-primary" data-dialog="leave">${icon("plus")} Novo registro</button>`)}<section class="card"><div class="people-list">${(records || []).length ? records.map((item) => operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", `${formatDate(item.start_date)} a ${formatDate(item.end_date)} · ${item.leave_type.replaceAll("_", " ")}`, item.status, `<button class="btn btn-small btn-secondary" data-edit-leave="${item.id}">${icon("edit")} Alterar</button>`)).join("") : emptyState("Nenhum período registrado", "Cadastre férias ou afastamentos para centralizar datas e observações.", `<button class="btn btn-primary" data-dialog="leave">Novo registro</button>`)}</div></section>`;
+}
+
+async function renderTerminations(content) {
+  const [{ data: cases, error }, references] = await Promise.all([
+    supabase.from("termination_cases").select("*").order("created_at", { ascending: false }), loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  content.innerHTML = `${pageHead("Desligamentos", "Preserve o histórico e acompanhe exame, documentos, contabilidade e encerramento.", `<button class="btn btn-primary" data-dialog="termination">${icon("plus")} Abrir desligamento</button>`)}<section class="card"><div class="people-list">${(cases || []).length ? cases.map((item) => operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", `${companyMap.get(item.company_id) || "Empresa não informada"} · ${item.reason || "Motivo não informado"}`, item.status, `<button class="btn btn-small btn-secondary" data-edit-termination="${item.id}">${icon("edit")} Abrir</button>`)).join("") : emptyState("Nenhum desligamento aberto", "Abra o processo antes de iniciar as providências para manter tudo auditável.", `<button class="btn btn-primary" data-dialog="termination">Abrir desligamento</button>`)}</div></section>`;
+}
+
+async function renderDocuments(content) {
+  const [{ data: documents, error }, references] = await Promise.all([
+    supabase.from("document_records").select("*").order("created_at", { ascending: false }).limit(250), loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  content.innerHTML = `${pageHead("Documentos", "Arquivo privado e padronizado por jovem, empresa e processo.", `<button class="btn btn-primary" data-dialog="document">${icon("upload")} Enviar documento</button>`)}<section class="card"><div class="people-list">${(documents || []).length ? documents.map((item) => operationalRow(item.title, `${apprenticeMap.get(item.apprentice_id) || companyMap.get(item.company_id) || "Registro vinculado"} · ${item.category} · ${formatDate(item.created_at, true)}`, item.is_generated ? "Gerado pelo portal" : "Enviado", `<button class="btn btn-small btn-secondary" data-download-document="${item.id}">${icon("download")} Baixar</button>`)).join("") : emptyState("Nenhum documento arquivado", "Envie o primeiro documento para criar um histórico digital único.", `<button class="btn btn-primary" data-dialog="document">Enviar documento</button>`)}</div></section>`;
+}
+
+async function renderAccounting(content) {
+  const [{ data: records, error }, references] = await Promise.all([
+    supabase.from("accounting_dispatches").select("*").order("due_at", { ascending: true, nullsFirst: false }), loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
+  content.innerHTML = `${pageHead("Contabilidade", "Controle o que precisa ser enviado, o retorno e a conferência, sem executar cálculo trabalhista no Portal.", `<button class="btn btn-primary" data-dialog="accounting">${icon("plus")} Novo envio</button>`)}<section class="card"><div class="people-list">${(records || []).length ? records.map((item) => operationalRow(item.title, `${apprenticeMap.get(item.apprentice_id) || "Sem jovem vinculado"}${item.due_at ? ` · prazo ${formatDate(item.due_at, true)}` : ""}`, item.status, `<button class="btn btn-small btn-secondary" data-edit-accounting="${item.id}">${icon("edit")} Alterar</button>`)).join("") : emptyState("Nenhum envio pendente", "Crie um registro quando uma admissão, férias, afastamento ou alteração precisar ir para a contabilidade.", `<button class="btn btn-primary" data-dialog="accounting">Novo envio</button>`)}</div></section>`;
 }
 
 async function renderPeople(content) {
@@ -1837,6 +1938,43 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
+  if (["admission", "contract", "leave", "termination", "accounting", "document"].includes(type)) {
+    const references = await loadOperationalReferences();
+    const apprenticeOptions = references.apprentices.map((person) => `<option value="${person.id}">${escapeHtml(person.full_name)}</option>`).join("");
+    const companyOptions = references.companies.map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("");
+    const selectRecord = async (table) => {
+      if (!recordId) return {};
+      const { data, error } = await supabase.from(table).select("*").eq("id", recordId).single();
+      if (error) throw error;
+      return data;
+    };
+    if (type === "admission") {
+      const item = await selectRecord("admission_cases");
+      const checklist = recordId ? await supabase.from("admission_checklist_items").select("*").eq("admission_id", recordId).order("position") : { data: [] };
+      if (checklist.error) throw checklist.error;
+      body = `<form id="admission-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Início previsto<input name="targetStartDate" type="date" value="${escapeHtml(item.target_start_date || "")}" /></label><label>Status<select name="status"><option value="approved">Aprovado</option><option value="documents_pending">Documentos pendentes</option><option value="documents_complete">Documentos completos</option><option value="medical_exam">Exame admissional</option><option value="contract_preparation">Contrato em elaboração</option><option value="signatures_pending">Aguardando assinaturas</option><option value="accounting">Contabilidade / eSocial</option><option value="enrollment">Matrícula / curso</option><option value="completed">Admissão concluída</option></select></label></div><label>Observações<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<label>Checklist da admissão<div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="check-${check.id}" ${check.is_completed ? "checked" : ""} /> ${escapeHtml(check.title)}</label>`).join("") || "Nenhum item criado"}</div></label>` : `<label>Checklist inicial<textarea name="checklistItems" rows="7">Documentação recebida\nDocumentação conferida\nExame admissional solicitado\nExame admissional realizado\nContrato elaborado\nCalendário elaborado\nContrato assinado\nContabilidade acionada\nConfirmação do eSocial\nMatrícula criada\nJovem vinculado à empresa\nDocumentos arquivados</textarea></label>`}<button class="btn btn-primary" type="submit">${recordId ? "Salvar admissão" : "Abrir admissão"}</button></form>`;
+    }
+    if (type === "contract") {
+      const item = await selectRecord("contracts");
+      body = `<form id="contract-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Início<input name="startDate" type="date" required value="${escapeHtml(item.start_date || "")}" /></label><label>Término<input name="endDate" type="date" required value="${escapeHtml(item.end_date || "")}" /></label><label>Função<input name="positionTitle" maxlength="160" value="${escapeHtml(item.position_title || "")}" /></label><label>Jornada semanal<input name="weeklyHours" type="number" min="0" max="168" step="0.5" value="${escapeHtml(item.weekly_hours || "")}" /></label><label>Salário<input name="salary" type="number" min="0" step="0.01" value="${escapeHtml(item.salary || "")}" /></label><label>Status<select name="status"><option value="scheduled">A iniciar</option><option value="active">Ativo</option><option value="closing">Encerramento</option><option value="ended">Encerrado</option></select></label></div><label>Observações<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar contrato" : "Cadastrar contrato"}</button></form>`;
+    }
+    if (type === "leave") {
+      const item = await selectRecord("leave_records");
+      body = `<form id="leave-form" class="dialog-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>Tipo<select name="leaveType"><option value="vacation">Férias</option><option value="medical_leave">Afastamento médico</option><option value="other_leave">Outro afastamento</option></select></label><label>Status<select name="status"><option value="planned">Planejado</option><option value="approved">Aprovado</option><option value="in_progress">Em andamento</option><option value="completed">Concluído</option></select></label><label>Início<input name="startDate" type="date" required value="${escapeHtml(item.start_date || "")}" /></label><label>Término<input name="endDate" type="date" required value="${escapeHtml(item.end_date || "")}" /></label></div><label>Observações<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">Salvar registro</button></form>`;
+    }
+    if (type === "termination") {
+      const item = await selectRecord("termination_cases");
+      body = `<form id="termination-form" class="dialog-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Data de desligamento<input name="effectiveDate" type="date" value="${escapeHtml(item.effective_date || "")}" /></label><label>Status<select name="status"><option value="request">Solicitação</option><option value="analysis">Análise</option><option value="medical_exam">Exame demissional</option><option value="documentation">Documentação</option><option value="accounting">Contabilidade</option><option value="termination">Rescisão</option><option value="finance">Financeiro</option><option value="documents_delivered">Documentos entregues</option><option value="completed">Concluído</option></select></label></div><label>Motivo<textarea name="reason" rows="3">${escapeHtml(item.reason || "")}</textarea></label><label>Observações<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">Salvar desligamento</button></form>`;
+    }
+    if (type === "accounting") {
+      const item = await selectRecord("accounting_dispatches");
+      body = `<form id="accounting-form" class="dialog-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><label>Assunto<input name="title" required maxlength="180" value="${escapeHtml(item.title || "")}" /></label><div class="form-grid two-columns"><label>Tipo<select name="dispatchType"><option value="admission">Admissão</option><option value="termination">Desligamento</option><option value="vacation">Férias</option><option value="leave">Afastamento</option><option value="payroll">Folha</option><option value="registration_change">Alteração cadastral</option></select></label><label>Status<select name="status"><option value="pending">Pendente</option><option value="preparing">Em preparação</option><option value="sent">Enviado</option><option value="waiting_response">Aguardando retorno</option><option value="received">Recebido</option><option value="verified">Conferido</option><option value="completed">Concluído</option></select></label><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${apprenticeOptions}</select></label><label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(item.due_at)}" /></label></div><label>Descrição<textarea name="description" rows="5">${escapeHtml(item.description || "")}</textarea></label><button class="btn btn-primary" type="submit">Salvar envio</button></form>`;
+    }
+    if (type === "document") {
+      body = `<form id="document-form" class="dialog-form"><label>Arquivo<input name="file" type="file" accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></label><label>Título<input name="title" required maxlength="180" /></label><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${apprenticeOptions}</select></label><label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${companyOptions}</select></label><label>Categoria<select name="category"><option value="admission">Admissão</option><option value="contract">Contrato</option><option value="documents">Documentos</option><option value="vacation">Férias</option><option value="leave">Afastamentos</option><option value="termination">Desligamento</option><option value="accounting">Contabilidade</option><option value="other">Outro</option></select></label></div><p class="form-note">Os documentos ficam em área privada; somente a equipe CAFCM autorizada consegue acessar.</p><button class="btn btn-primary" type="submit">Enviar documento</button></form>`;
+    }
+  }
+
   if (type === "lesson") {
     let lesson = {};
     if (recordId) {
@@ -1918,6 +2056,12 @@ async function openDialog(type, recordId = null) {
     "people-import": "Importar pessoas",
     "pipeline-item": recordId ? "Alterar processo" : "Novo processo",
     task: recordId ? "Alterar tarefa" : "Nova tarefa",
+    admission: recordId ? "Alterar admissão" : "Nova admissão",
+    contract: recordId ? "Alterar contrato" : "Novo contrato",
+    leave: recordId ? "Alterar período" : "Férias ou afastamento",
+    termination: recordId ? "Alterar desligamento" : "Abrir desligamento",
+    accounting: recordId ? "Alterar envio" : "Novo envio à contabilidade",
+    document: "Enviar documento",
     course: recordId ? "Alterar curso" : "Criar curso",
     invite: "Criar pessoa e enviar convite",
     lesson: recordId ? "Alterar aula" : "Adicionar aula",
@@ -2177,6 +2321,19 @@ app.addEventListener("click", async (event) => {
     return renderView();
   }
   if (target.dataset.editPipelineItem) return openDialog("pipeline-item", target.dataset.editPipelineItem);
+  if (target.dataset.editAdmission) return openDialog("admission", target.dataset.editAdmission);
+  if (target.dataset.editContract) return openDialog("contract", target.dataset.editContract);
+  if (target.dataset.editLeave) return openDialog("leave", target.dataset.editLeave);
+  if (target.dataset.editTermination) return openDialog("termination", target.dataset.editTermination);
+  if (target.dataset.editAccounting) return openDialog("accounting", target.dataset.editAccounting);
+  if (target.dataset.downloadDocument) {
+    const { data, error } = await supabase.from("document_records").select("storage_path").eq("id", target.dataset.downloadDocument).single();
+    if (error) return showToast(friendlyError(error), "error");
+    const { data: signed, error: signedError } = await supabase.storage.from("cafcm-documents").createSignedUrl(data.storage_path, 60);
+    if (signedError) return showToast(friendlyError(signedError), "error");
+    window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
   if (target.dataset.archivePipelineItem) {
     if (!window.confirm(`Arquivar o processo “${target.dataset.processTitle}”? O histórico de movimentações e auditoria será preservado.`)) return;
     const { error } = await supabase.from("pipeline_items").update({ is_archived: true, archived_at: new Date().toISOString() }).eq("id", target.dataset.archivePipelineItem);
@@ -2821,6 +2978,79 @@ app.addEventListener("submit", async (event) => {
       closeOverlay();
       showToast(processId ? "Processo atualizado." : "Processo criado na esteira.");
       return renderView();
+    }
+
+    if (form.id === "admission-form") {
+      const id = String(values.id || "");
+      const payload = { apprentice_id: values.apprenticeId, company_id: values.companyId, target_start_date: values.targetStartDate || null, status: values.status || "approved", notes: String(values.notes || "").trim() };
+      let admissionId = id;
+      if (id) {
+        const { error } = await supabase.from("admission_cases").update(payload).eq("id", id);
+        if (error) throw error;
+        const checks = await supabase.from("admission_checklist_items").select("id,is_completed").eq("admission_id", id);
+        if (checks.error) throw checks.error;
+        for (const check of checks.data || []) {
+          const complete = form.querySelector(`[name="check-${check.id}"]`)?.checked || false;
+          if (complete !== check.is_completed) {
+            const { error } = await supabase.from("admission_checklist_items").update({ is_completed: complete }).eq("id", check.id);
+            if (error) throw error;
+          }
+        }
+      } else {
+        const { data, error } = await supabase.from("admission_cases").insert({ ...payload, created_by: state.profile.id }).select("id").single();
+        if (error) throw error;
+        admissionId = data.id;
+        const lines = String(values.checklistItems || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 50);
+        if (lines.length) {
+          const { error: checklistError } = await supabase.from("admission_checklist_items").insert(lines.map((title, index) => ({ admission_id: admissionId, title, position: index + 1 })));
+          if (checklistError) throw checklistError;
+        }
+        await supabase.from("apprentice_records").upsert({ profile_id: values.apprenticeId, status: "admission" });
+      }
+      closeOverlay(); showToast(id ? "Admissão atualizada." : "Admissão aberta com checklist."); return renderView();
+    }
+
+    if (form.id === "contract-form") {
+      const payload = { apprentice_id: values.apprenticeId, company_id: values.companyId, start_date: values.startDate, end_date: values.endDate, position_title: String(values.positionTitle || "").trim(), weekly_hours: valueOrNull(values.weeklyHours), salary: valueOrNull(values.salary), status: values.status || "scheduled", notes: String(values.notes || "").trim() };
+      if (new Date(`${payload.end_date}T00:00:00`) < new Date(`${payload.start_date}T00:00:00`)) throw new Error("A data de término não pode ser anterior ao início.");
+      const query = values.id ? supabase.from("contracts").update(payload).eq("id", values.id) : supabase.from("contracts").insert({ ...payload, created_by: state.profile.id });
+      const { error } = await query; if (error) throw error;
+      await supabase.from("apprentice_records").upsert({ profile_id: values.apprenticeId, status: payload.status === "active" ? "active" : "admission" });
+      closeOverlay(); showToast(values.id ? "Contrato atualizado." : "Contrato cadastrado."); return renderView();
+    }
+
+    if (form.id === "leave-form") {
+      const payload = { apprentice_id: values.apprenticeId, leave_type: values.leaveType, status: values.status, start_date: values.startDate, end_date: values.endDate, notes: String(values.notes || "").trim() };
+      if (new Date(`${payload.end_date}T00:00:00`) < new Date(`${payload.start_date}T00:00:00`)) throw new Error("A data de término não pode ser anterior ao início.");
+      const { error } = values.id ? await supabase.from("leave_records").update(payload).eq("id", values.id) : await supabase.from("leave_records").insert({ ...payload, created_by: state.profile.id });
+      if (error) throw error; closeOverlay(); showToast("Registro salvo."); return renderView();
+    }
+
+    if (form.id === "termination-form") {
+      const payload = { apprentice_id: values.apprenticeId, company_id: values.companyId, effective_date: values.effectiveDate || null, status: values.status || "request", reason: String(values.reason || "").trim(), notes: String(values.notes || "").trim() };
+      const { error } = values.id ? await supabase.from("termination_cases").update(payload).eq("id", values.id) : await supabase.from("termination_cases").insert({ ...payload, created_by: state.profile.id });
+      if (error) throw error; await supabase.from("apprentice_records").upsert({ profile_id: values.apprenticeId, status: "termination" }); closeOverlay(); showToast("Desligamento salvo."); return renderView();
+    }
+
+    if (form.id === "accounting-form") {
+      const payload = { title: String(values.title || "").trim(), dispatch_type: values.dispatchType, status: values.status, apprentice_id: values.apprenticeId || null, due_at: values.dueAt ? new Date(values.dueAt).toISOString() : null, description: String(values.description || "").trim(), created_by: state.profile.id };
+      const { error } = values.id ? await supabase.from("accounting_dispatches").update(payload).eq("id", values.id) : await supabase.from("accounting_dispatches").insert(payload);
+      if (error) throw error; closeOverlay(); showToast("Envio à contabilidade salvo."); return renderView();
+    }
+
+    if (form.id === "document-form") {
+      const file = values.file;
+      if (!(file instanceof File) || !file.size) throw new Error("Selecione um arquivo.");
+      if (file.size > 25 * 1024 * 1024) throw new Error("O arquivo deve ter no máximo 25 MB.");
+      if (!values.apprenticeId && !values.companyId) throw new Error("Vincule o documento a um jovem ou empresa.");
+      const cleanName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
+      const owner = values.apprenticeId || values.companyId;
+      const path = `${owner}/${values.category}/${Date.now()}-${cleanName}`;
+      const { error: uploadError } = await supabase.storage.from("cafcm-documents").upload(path, file, { contentType: file.type, upsert: false });
+      if (uploadError) throw uploadError;
+      const { error } = await supabase.from("document_records").insert({ title: String(values.title || "").trim(), apprentice_id: values.apprenticeId || null, company_id: values.companyId || null, category: values.category, storage_path: path, mime_type: file.type, file_size: file.size, uploaded_by: state.profile.id });
+      if (error) { await supabase.storage.from("cafcm-documents").remove([path]); throw error; }
+      closeOverlay(); showToast("Documento enviado e arquivado."); return renderView();
     }
 
     if (form.id === "task-form") {
