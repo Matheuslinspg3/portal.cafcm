@@ -411,11 +411,8 @@ async function provisionInvitedUser(
     password: initialPassword,
     user_metadata: { full_name: person.fullName },
     app_metadata: appMetadata,
+    email_confirm: true,
   };
-
-  if (person.password) {
-    updateAttributes.email_confirm = true;
-  }
 
   const { error: updateError } = await admin.auth.admin.updateUserById(invited.user.id, updateAttributes);
 
@@ -604,12 +601,11 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
   const emailChanged = String(target.email ?? "").toLowerCase() !== email;
   if (emailChanged) {
     attributes.email = email;
-    if (target.email_confirmed_at ?? target.confirmed_at) attributes.email_confirm = true;
   }
   if (temporaryPassword) {
     attributes.password = temporaryPassword;
-    attributes.email_confirm = true;
   }
+  attributes.email_confirm = true;
 
   const { error: updateError } = await ctx.supabaseAdmin.auth.admin.updateUserById(userId, attributes);
   if (updateError) return authErrorResponse(req, updateError, "Não foi possível alterar os dados desta pessoa.");
@@ -937,7 +933,7 @@ async function resendPortalAccess(req: Request, input: Record<string, unknown>) 
   }
 
   const { error: resendError } = await ctx.supabaseAdmin.auth.resend({
-    type: "invite",
+    type: "signup",
     email: user.email,
     options: { emailRedirectTo: siteOrigin(req) },
   });
