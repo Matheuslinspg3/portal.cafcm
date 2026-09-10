@@ -380,9 +380,8 @@ async function provisionInvitedUser(
   req: Request,
   admin: any,
   requesterId: string,
-  person: { email: string; fullName: string; role: string; companyId: string | null; password?: string },
+  person: { email: string; fullName: string; role: string; companyId: string | null },
 ) {
-  const initialPassword = person.password || generateTemporaryPassword();
   const { error: pendingError } = await admin.from("pending_invites").upsert({
     email: person.email,
     full_name: person.fullName,
@@ -407,14 +406,10 @@ async function provisionInvitedUser(
   const appMetadata: Record<string, unknown> = { portal_role: person.role };
   if (person.companyId) appMetadata.company_id = person.companyId;
 
-  const updateAttributes: Record<string, unknown> = {
-    password: initialPassword,
+  const { error: updateError } = await admin.auth.admin.updateUserById(invited.user.id, {
     user_metadata: { full_name: person.fullName },
     app_metadata: appMetadata,
-    email_confirm: true,
-  };
-
-  const { error: updateError } = await admin.auth.admin.updateUserById(invited.user.id, updateAttributes);
+  });
 
   if (updateError) {
     await admin.auth.admin.deleteUser(invited.user.id);
@@ -440,7 +435,7 @@ async function provisionInvitedUser(
   }
 
   await admin.from("pending_invites").delete().eq("email", person.email);
-  return { user: invited.user, temporaryPassword: initialPassword };
+  return { user: invited.user };
 }
 
 async function inviteUser(req: Request, input: Record<string, unknown>) {
@@ -453,14 +448,9 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
   const role = cleanText(input.role, 32);
   const suppliedCompanyId = cleanText(input.companyId, 36) || null;
   const companyId = role === "cafcm_admin" ? null : suppliedCompanyId;
-  const requestedPassword = String(input.password ?? "");
 
   if (!validEmail(email) || fullName.length < 2 || !ROLE_VALUES.has(role)) {
     return json(req, { error: "Revise o nome, o e-mail e o tipo de acesso." }, 400);
-  }
-
-  if (requestedPassword && (requestedPassword.length < 10 || requestedPassword.length > 128)) {
-    return json(req, { error: "A senha informada deve ter entre 10 e 128 caracteres." }, 400);
   }
 
   const companyError = await validateCompanyLink(ctx.supabaseAdmin, role, companyId);
@@ -480,14 +470,13 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
       fullName,
       role,
       companyId,
-      password: requestedPassword || undefined,
     });
     await writeAudit(ctx.supabaseAdmin, requesterId, "user.invited", "profile", result.user.id, {
       email,
       role,
       company_id: companyId,
     }, result.user.id);
-    return json(req, { ok: true, userId: result.user.id, temporaryPassword: result.temporaryPassword });
+    return json(req, { ok: true, userId: result.user.id });
   } catch (error) {
     return authErrorResponse(req, error, "Não foi possível enviar o convite. Verifique o e-mail e tente novamente.");
   }
@@ -601,11 +590,9 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
   const emailChanged = String(target.email ?? "").toLowerCase() !== email;
   if (emailChanged) {
     attributes.email = email;
+    if (target.email_confirmed_at ?? target.confirmed_at) attributes.email_confirm = true;
   }
-  if (temporaryPassword) {
-    attributes.password = temporaryPassword;
-  }
-  attributes.email_confirm = true;
+  if (temporaryPassword) attributes.password = temporaryPassword;
 
   const { error: updateError } = await ctx.supabaseAdmin.auth.admin.updateUserById(userId, attributes);
   if (updateError) return authErrorResponse(req, updateError, "Não foi possível alterar os dados desta pessoa.");
@@ -820,10 +807,8 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
           fullName,
           role,
           companyId,
-          password: password || undefined,
         });
         userId = created.user.id;
-        temporaryPassword = created.temporaryPassword;
         resultType = "invited";
         authByEmail.set(email, created.user);
       }
