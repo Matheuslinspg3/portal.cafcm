@@ -970,6 +970,127 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
   return json(req, { ok: true, results, historyRestored, historyFailed });
 }
 
+async function convertCandidateToApprentice(req: Request, input: Record<string, unknown>) {
+  const access = await requireCafcmAdmin(req, "vacancies.manage");
+  if ("response" in access) return access.response;
+  const { ctx, requesterId } = access;
+  const applicationId = cleanText(input.applicationId, 36);
+  const targetStartDate = cleanText(input.targetStartDate, 10) || null;
+
+  if (!/^[0-9a-f-]{36}$/i.test(applicationId) || (targetStartDate && !/^\d{4}-\d{2}-\d{2}$/.test(targetStartDate))) {
+    return json(req, { error: "Revise a seleção e a data prevista para admissão." }, 400);
+  }
+
+  const { data: application, error: applicationError } = await ctx.supabaseAdmin
+    .from("vacancy_applications")
+    .select("id,status,candidate_id,vacancy_id")
+    .eq("id", applicationId)
+    .maybeSingle();
+  if (applicationError || !application) return json(req, { error: "O processo seletivo não foi encontrado." }, 404);
+  if (!["approved", "hired"].includes(application.status)) {
+    return json(req, { error: "Marque o candidato como aprovado antes de iniciar a admissão." }, 409);
+  }
+
+  const [{ data: candidate, error: candidateError }, { data: vacancy, error: vacancyError }] = await Promise.all([
+    ctx.supabaseAdmin.from("candidates").select("id,full_name,email,phone,cpf,birth_date,city,neighborhood,notes").eq("id", application.candidate_id).maybeSingle(),
+    ctx.supabaseAdmin.from("job_vacancies").select("id,title,company_id").eq("id", application.vacancy_id).maybeSingle(),
+  ]);
+  if (candidateError || vacancyError || !candidate || !vacancy) {
+    return json(req, { error: "Os dados do candidato ou da vaga não estão completos." }, 409);
+  }
+
+  const email = cleanText(candidate.email, 254).toLowerCase();
+  const fullName = cleanText(candidate.full_name, 160);
+  if (!validEmail(email)) {
+    return json(req, { error: "Cadastre um e-mail válido no candidato antes de iniciar a admissão." }, 409);
+  }
+
+  const { data: existingAdmission, error: existingAdmissionError } = await ctx.supabaseAdmin
+    .from("admission_cases")
+    .select("id,apprentice_id")
+    .eq("application_id", application.id)
+    .maybeSingle();
+  if (existingAdmissionError) return json(req, { error: "Não foi possível verificar a admissão existente." }, 500);
+  if (existingAdmission) {
+    return json(req, { ok: true, admissionId: existingAdmission.id, userId: existingAdmission.apprentice_id, alreadyConverted: true });
+  }
+
+  let authUser = await findAuthUserByEmail(ctx.supabaseAdmin, email);
+  let invited = false;
+  if (authUser && authUser.app_metadata?.portal_role && authUser.app_metadata.portal_role !== "apprentice") {
+    return json(req, { error: "Este e-mail já pertence a um acesso que não é de jovem aprendiz." }, 409);
+  }
+
+  if (!authUser) {
+    try {
+      const provisioned = await provisionInvitedUser(req, ctx.supabaseAdmin, requesterId, {
+        email,
+        fullName,
+        role: "apprentice",
+        companyId: vacancy.company_id,
+        department: null,
+      });
+      authUser = provisioned.user;
+      invited = true;
+    } catch (error) {
+      return authErrorResponse(req, error, "Não foi possível criar e convidar o jovem aprovado.");
+    }
+  } else {
+    const appMetadata = { ...(authUser.app_metadata ?? {}), portal_role: "apprentice", company_id: vacancy.company_id };
+    const { error: authUpdateError } = await ctx.supabaseAdmin.auth.admin.updateUserById(authUser.id, {
+      user_metadata: { ...(authUser.user_metadata ?? {}), full_name: fullName },
+      app_metadata: appMetadata,
+    });
+    if (authUpdateError) return authErrorResponse(req, authUpdateError, "Não foi possível atualizar o acesso do jovem.");
+    const [{ error: profileError }, { error: contactError }] = await Promise.all([
+      ctx.supabaseAdmin.from("profiles").upsert({ id: authUser.id, full_name: fullName, role: "apprentice", company_id: vacancy.company_id, department: null, is_active: true, archived_at: null, archived_by: null }),
+      ctx.supabaseAdmin.from("profile_contacts").upsert({ id: authUser.id, email }),
+    ]);
+    if (profileError || contactError) return json(req, { error: "O acesso existe, mas o perfil do jovem não pôde ser atualizado." }, 500);
+  }
+
+  const apprenticeId = String(authUser.id);
+  const { error: recordError } = await ctx.supabaseAdmin.from("apprentice_records").upsert({
+    profile_id: apprenticeId,
+    cpf: cleanText(candidate.cpf, 32) || null,
+    birth_date: candidate.birth_date || null,
+    phone: cleanText(candidate.phone, 40) || null,
+    personal_email: email,
+    address: { city: cleanText(candidate.city, 120), neighborhood: cleanText(candidate.neighborhood, 120) },
+    status: "admission",
+    notes: cleanText(candidate.notes, 12000),
+  });
+  if (recordError) return json(req, { error: "O acesso foi preparado, mas o cadastro do jovem não pôde ser concluído. Tente novamente." }, 500);
+
+  const { data: admission, error: admissionError } = await ctx.supabaseAdmin.from("admission_cases").insert({
+    apprentice_id: apprenticeId,
+    company_id: vacancy.company_id,
+    candidate_id: candidate.id,
+    application_id: application.id,
+    target_start_date: targetStartDate,
+    status: "approved",
+    notes: `Admissão iniciada a partir da vaga: ${cleanText(vacancy.title, 180)}`,
+    created_by: requesterId,
+  }).select("id").single();
+  if (admissionError || !admission) {
+    return json(req, { error: "O jovem foi criado, mas a admissão não pôde ser aberta. Tente novamente para concluir." }, 500);
+  }
+
+  await Promise.all([
+    ctx.supabaseAdmin.from("vacancy_applications").update({ status: "hired", approved_at: new Date().toISOString() }).eq("id", application.id),
+    ctx.supabaseAdmin.from("candidates").update({ status: "hired", archived_at: null }).eq("id", candidate.id),
+  ]);
+  await writeAudit(ctx.supabaseAdmin, requesterId, "candidate.converted", "candidate", candidate.id, {
+    application_id: application.id,
+    vacancy_id: vacancy.id,
+    company_id: vacancy.company_id,
+    admission_id: admission.id,
+    invited,
+  }, apprenticeId);
+
+  return json(req, { ok: true, admissionId: admission.id, userId: apprenticeId, invited });
+}
+
 async function logPortalEvent(req: Request, input: Record<string, unknown>) {
   const { data: ctx, error } = await createSupabaseContext(req, { auth: "user" });
   if (error || !ctx) return json(req, { error: "Sua sessão expirou." }, 401);
@@ -1031,6 +1152,7 @@ export default {
       if (action === "set_user_status") return await setPortalUserStatus(req, input);
       if (action === "person_history") return await getPersonHistory(req, input);
       if (action === "import_people") return await importPortalPeople(req, input);
+      if (action === "convert_candidate") return await convertCandidateToApprentice(req, input);
       if (action === "log_event") return await logPortalEvent(req, input);
       if (action === "resend_access") return await resendPortalAccess(req, input);
       return json(req, { error: "Ação inválida." }, 400);

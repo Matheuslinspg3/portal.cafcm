@@ -40,6 +40,10 @@ const state = {
   taskFilter: "mine",
   notificationUnreadCount: 0,
   draggedPipelineItemId: null,
+  vacancyTab: "overview",
+  vacancySearch: "",
+  vacancyStatus: "",
+  vacancyCompany: "",
 };
 
 const roleLabels = {
@@ -64,6 +68,64 @@ const departmentPermissions = {
   personnel: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "personnel.read", "personnel.manage", "contracts.read", "contracts.manage", "documents.read", "documents.manage", "finance.read", "finance.manage"],
   hr: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "people.read", "people.manage", "audit.read"],
   finance: ["directory.read", "operations.read", "operations.manage", "companies.read", "contracts.read", "documents.read", "documents.manage", "finance.read", "finance.manage"],
+};
+
+const candidateStatusLabels = {
+  new: "Novo",
+  screening: "Em triagem",
+  interview: "Em entrevistas",
+  approved: "Aprovado",
+  rejected: "Não aprovado",
+  hired: "Convertido em jovem",
+  archived: "Arquivado",
+};
+
+const vacancyStatusLabels = {
+  draft: "Rascunho",
+  open: "Aberta",
+  paused: "Pausada",
+  filled: "Preenchida",
+  cancelled: "Cancelada",
+};
+
+const applicationStatusLabels = {
+  received: "Candidato recebido",
+  screening: "Triagem",
+  cafcm_interview: "Entrevista CAFCM",
+  referred_company: "Encaminhado à empresa",
+  company_interview: "Entrevista na empresa",
+  waiting_return: "Aguardando retorno",
+  approved: "Aprovado",
+  talent_pool: "Banco de talentos",
+  rejected: "Não aprovado",
+  withdrawn: "Desistente",
+  hired: "Admissão iniciada",
+};
+
+const admissionStatusLabels = {
+  approved: "Aprovado",
+  documents_pending: "Documentos pendentes",
+  documents_complete: "Documentos completos",
+  medical_exam: "Exame admissional",
+  contract_preparation: "Contrato em elaboração",
+  signatures_pending: "Aguardando assinaturas",
+  accounting: "Contabilidade / eSocial",
+  enrollment: "Matrícula / curso",
+  completed: "Admissão concluída",
+  cancelled: "Cancelada",
+};
+
+const terminationStatusLabels = {
+  request: "Solicitação",
+  analysis: "Análise",
+  medical_exam: "Exame demissional",
+  documentation: "Documentação",
+  accounting: "Contabilidade",
+  termination: "Rescisão",
+  finance: "Financeiro",
+  documents_delivered: "Documentos entregues",
+  completed: "Concluído",
+  cancelled: "Cancelado",
 };
 
 const viewPermissions = {
@@ -140,6 +202,20 @@ const auditActionLabels = {
   "companies.insert": "Empresa cadastrada",
   "companies.update": "Empresa alterada",
   "companies.delete": "Empresa excluída",
+  "candidates.insert": "Candidato cadastrado",
+  "candidates.update": "Candidato atualizado",
+  "candidates.delete": "Candidato excluído",
+  "job_vacancies.insert": "Vaga criada",
+  "job_vacancies.update": "Vaga atualizada",
+  "job_vacancies.delete": "Vaga excluída",
+  "vacancy_applications.insert": "Seleção iniciada",
+  "vacancy_applications.update": "Etapa da seleção atualizada",
+  "vacancy_applications.delete": "Seleção excluída",
+  "partnership_agreements.insert": "Parceria cadastrada",
+  "partnership_agreements.update": "Parceria atualizada",
+  "partnership_agreements.delete": "Parceria excluída",
+  "candidate_documents.insert": "Documento de candidato enviado",
+  "candidate.converted": "Candidato convertido em jovem",
   "profiles.update": "Perfil alterado",
   "courses.insert": "Curso criado",
   "courses.update": "Curso alterado",
@@ -362,7 +438,7 @@ function initials(name) {
 
 function formatDate(value, withTime = false) {
   if (!value) return "Sem prazo";
-  const date = new Date(value);
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T12:00:00` : value);
   if (Number.isNaN(date.getTime())) return "Sem prazo";
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
@@ -416,6 +492,22 @@ function formatWorkload(value) {
   const hours = Number(value || 0);
   if (!hours) return "Carga horária não informada";
   return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(hours)} h`;
+}
+
+function formatMoney(value) {
+  if (value === null || value === undefined || value === "") return "Não informado";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
+}
+
+function selectOptions(labels, selected = "") {
+  return Object.entries(labels).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function workflowProgress(labels, currentStatus) {
+  const entries = Object.entries(labels).filter(([value]) => !["cancelled", "rejected", "withdrawn", "talent_pool", "hired"].includes(value));
+  const foundIndex = entries.findIndex(([value]) => value === currentStatus);
+  const currentIndex = currentStatus === "hired" ? entries.findIndex(([value]) => value === "approved") : foundIndex;
+  return `<div class="workflow-steps">${entries.map(([value, label], index) => `<span class="workflow-step ${index < currentIndex ? "is-complete" : index === currentIndex ? "is-current" : ""}"><i>${index < currentIndex ? "✓" : index + 1}</i><small>${escapeHtml(label)}</small></span>`).join("")}</div>`;
 }
 
 function formatDateTimeInput(value) {
@@ -1228,23 +1320,104 @@ function operationalRow(title, detail, status, actions = "") {
 }
 
 async function renderVacancies(content) {
-  const [candidates, vacancies, applications, references] = await Promise.all([
-    supabase.from("candidates").select("id,status"), supabase.from("job_vacancies").select("id,title,company_id,quantity,status,due_date").order("created_at", { ascending: false }), supabase.from("vacancy_applications").select("id,vacancy_id,status"), loadOperationalReferences(),
+  const [candidates, vacancies, applications, documents, references] = await Promise.all([
+    supabase.from("candidates").select("*").order("created_at", { ascending: false }),
+    supabase.from("job_vacancies").select("*").order("created_at", { ascending: false }),
+    supabase.from("vacancy_applications").select("*").order("updated_at", { ascending: false }),
+    supabase.from("candidate_documents").select("id,candidate_id"),
+    loadOperationalReferences(),
   ]);
-  if (candidates.error || vacancies.error || applications.error) throw candidates.error || vacancies.error || applications.error;
+  if (candidates.error || vacancies.error || applications.error || documents.error) throw candidates.error || vacancies.error || applications.error || documents.error;
+  const canManageVacancies = hasPermission("vacancies.manage");
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  const candidateMap = new Map((candidates.data || []).map((item) => [item.id, item]));
+  const vacancyMap = new Map((vacancies.data || []).map((item) => [item.id, item]));
   const active = (vacancies.data || []).filter((item) => item.status === "open");
-  content.innerHTML = `${pageHead("Gestão de vagas", "Controle empresas aptas, candidatos, vagas abertas e cada etapa da seleção.", `<button class="btn btn-secondary" data-dialog="candidate">${icon("plus")} Candidato</button><button class="btn btn-secondary" data-dialog="application">${icon("link")} Iniciar seleção</button><button class="btn btn-primary" data-dialog="vacancy">${icon("plus")} Abrir vaga</button>`)}
-    <section class="metric-grid">${metric("Empresas ativas", references.companies.filter((item) => item.is_active).length, "building")}${metric("Candidatos", (candidates.data || []).length, "users")}${metric("Vagas abertas", active.length, "kanban")}${metric("Em seleção", (applications.data || []).filter((item) => !["rejected", "hired"].includes(item.status)).length, "tasks")}</section>
-    <section class="card"><div class="card-head"><div><span class="eyebrow">Vagas abertas</span><h2>Demandas das empresas</h2></div></div>${active.length ? `<div class="people-list">${active.map((item) => operationalRow(item.title, `${companyMap.get(item.company_id) || "Empresa"} · ${item.quantity} posição(ões)${item.due_date ? ` · prazo ${formatDate(item.due_date)}` : ""}`, "Aberta")).join("")}</div>` : emptyState("Nenhuma vaga aberta", "As próximas vagas cadastradas pelas empresas aparecerão aqui.")}</section>`;
+  const activeApplications = (applications.data || []).filter((item) => !["rejected", "withdrawn", "hired"].includes(item.status));
+  const filledMap = new Map();
+  const selectionMap = new Map();
+  const documentMap = new Map();
+  for (const item of applications.data || []) {
+    if (item.status === "hired") filledMap.set(item.vacancy_id, (filledMap.get(item.vacancy_id) || 0) + 1);
+    selectionMap.set(item.candidate_id, (selectionMap.get(item.candidate_id) || 0) + 1);
+  }
+  for (const item of documents.data || []) documentMap.set(item.candidate_id, (documentMap.get(item.candidate_id) || 0) + 1);
+
+  const search = state.vacancySearch.trim().toLocaleLowerCase("pt-BR");
+  const matchesSearch = (...parts) => !search || parts.filter(Boolean).join(" ").toLocaleLowerCase("pt-BR").includes(search);
+  const filteredVacancies = (vacancies.data || []).filter((item) => matchesSearch(item.title, companyMap.get(item.company_id), item.location, item.requirements)
+    && (!state.vacancyStatus || item.status === state.vacancyStatus)
+    && (!state.vacancyCompany || item.company_id === state.vacancyCompany));
+  const filteredCandidates = (candidates.data || []).filter((item) => matchesSearch(item.full_name, item.email, item.phone, item.cpf, item.city)
+    && (!state.vacancyStatus || item.status === state.vacancyStatus)
+    && (!state.vacancyCompany || (applications.data || []).some((application) => application.candidate_id === item.id && vacancyMap.get(application.vacancy_id)?.company_id === state.vacancyCompany)));
+  const filteredApplications = (applications.data || []).filter((item) => {
+    const candidate = candidateMap.get(item.candidate_id);
+    const vacancy = vacancyMap.get(item.vacancy_id);
+    return matchesSearch(candidate?.full_name, candidate?.email, vacancy?.title, companyMap.get(vacancy?.company_id))
+      && (!state.vacancyStatus || item.status === state.vacancyStatus)
+      && (!state.vacancyCompany || vacancy?.company_id === state.vacancyCompany);
+  });
+
+  const statusLabels = state.vacancyTab === "candidates" ? candidateStatusLabels : state.vacancyTab === "applications" ? applicationStatusLabels : vacancyStatusLabels;
+  const tabs = [
+    ["overview", "Resumo", "grid", ""],
+    ["vacancies", "Vagas", "kanban", (vacancies.data || []).length],
+    ["candidates", "Candidatos", "users", (candidates.data || []).length],
+    ["applications", "Seleções", "tasks", (applications.data || []).length],
+  ];
+  const actions = canManageVacancies ? `<button class="btn btn-secondary" data-dialog="candidate">${icon("plus")} Candidato</button><button class="btn btn-secondary" data-dialog="application">${icon("link")} Iniciar seleção</button><button class="btn btn-primary" data-dialog="vacancy">${icon("plus")} Abrir vaga</button>` : "";
+
+  const vacancyRows = filteredVacancies.map((item) => {
+    const filled = filledMap.get(item.id) || 0;
+    const remaining = Math.max(item.quantity - filled, 0);
+    const detail = `${companyMap.get(item.company_id) || "Empresa"} · ${filled}/${item.quantity} preenchida(s) · ${remaining} disponível(is)${item.due_date ? ` · prazo ${formatDate(item.due_date)}` : ""}`;
+    return operationalRow(item.title, detail, vacancyStatusLabels[item.status] || item.status, canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-vacancy="${item.id}">${icon("edit")} Alterar</button>` : "");
+  }).join("");
+  const candidateRows = filteredCandidates.map((item) => operationalRow(
+    item.full_name,
+    `${item.email || "Sem e-mail"}${item.phone ? ` · ${formatPhone(item.phone)}` : ""}${item.city ? ` · ${item.city}` : ""} · ${selectionMap.get(item.id) || 0} seleção(ões) · ${documentMap.get(item.id) || 0} arquivo(s)`,
+    candidateStatusLabels[item.status] || item.status,
+    canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-candidate="${item.id}">${icon("edit")} Abrir</button><button class="btn btn-small btn-quiet" data-archive-candidate="${item.id}" data-candidate-archived="${item.status === "archived"}">${item.status === "archived" ? "Reativar" : "Arquivar"}</button>` : "",
+  )).join("");
+  const applicationRows = filteredApplications.map((item) => {
+    const candidate = candidateMap.get(item.candidate_id);
+    const vacancy = vacancyMap.get(item.vacancy_id);
+    const canConvert = item.status === "approved";
+    const rowActions = canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-application="${item.id}">${icon("edit")} Atualizar</button>${canConvert ? `<button class="btn btn-small btn-primary" data-convert-candidate="${item.id}">${icon("arrow")} Iniciar admissão</button>` : ""}` : "";
+    return operationalRow(candidate?.full_name || "Candidato", `${vacancy?.title || "Vaga"} · ${companyMap.get(vacancy?.company_id) || "Empresa"}${item.company_interview_at ? ` · entrevista ${formatDate(item.company_interview_at, true)}` : ""}`, applicationStatusLabels[item.status] || item.status, rowActions);
+  }).join("");
+
+  let panel = "";
+  if (state.vacancyTab === "overview") {
+    panel = `<div class="operations-split"><section class="card"><div class="card-head"><div><span class="eyebrow">Vagas abertas</span><h2>Demanda atual</h2></div><button class="text-link" data-vacancy-tab="vacancies">Ver todas</button></div>${active.length ? `<div class="people-list">${active.slice(0, 6).map((item) => { const filled = filledMap.get(item.id) || 0; return operationalRow(item.title, `${companyMap.get(item.company_id) || "Empresa"} · ${Math.max(item.quantity - filled, 0)} vaga(s) disponível(is)`, "Aberta", canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-vacancy="${item.id}">Abrir</button>` : ""); }).join("")}</div>` : emptyState("Nenhuma vaga aberta", "Cadastre a demanda recebida de uma empresa parceira.")}</section><section class="card"><div class="card-head"><div><span class="eyebrow">Recrutamento</span><h2>Seleções em andamento</h2></div><button class="text-link" data-vacancy-tab="applications">Ver todas</button></div>${activeApplications.length ? `<div class="people-list">${activeApplications.slice(0, 6).map((item) => { const candidate = candidateMap.get(item.candidate_id); const vacancy = vacancyMap.get(item.vacancy_id); return operationalRow(candidate?.full_name || "Candidato", `${vacancy?.title || "Vaga"} · ${companyMap.get(vacancy?.company_id) || "Empresa"}`, applicationStatusLabels[item.status] || item.status, canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-application="${item.id}">Atualizar</button>` : ""); }).join("")}</div>` : emptyState("Nenhuma seleção em andamento", "Inclua um candidato em uma vaga para iniciar o acompanhamento.")}</section></div>`;
+  } else {
+    const rows = state.vacancyTab === "vacancies" ? vacancyRows : state.vacancyTab === "candidates" ? candidateRows : applicationRows;
+    const empty = state.vacancyTab === "vacancies" ? ["Nenhuma vaga encontrada", "Altere os filtros ou abra uma nova vaga."] : state.vacancyTab === "candidates" ? ["Nenhum candidato encontrado", "Altere os filtros ou cadastre um candidato."] : ["Nenhuma seleção encontrada", "Altere os filtros ou inicie um processo seletivo."];
+    panel = `<section class="card"><div class="operations-toolbar"><label class="search-field">${icon("search")}<input data-vacancy-search value="${escapeHtml(state.vacancySearch)}" placeholder="Buscar por nome, e-mail, vaga ou empresa" aria-label="Buscar" /></label><select data-vacancy-filter="status" aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(statusLabels, state.vacancyStatus)}</select><select data-vacancy-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.vacancyCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${state.vacancySearch || state.vacancyStatus || state.vacancyCompany ? `<button class="btn btn-quiet" data-clear-vacancy-filters>Limpar</button>` : ""}</div>${rows ? `<div class="people-list">${rows}</div>` : emptyState(empty[0], empty[1])}</section>`;
+  }
+
+  content.innerHTML = `${pageHead("Gestão de vagas", "Da abertura da vaga à admissão do jovem, com histórico e etapas sincronizadas.", actions)}
+    <section class="metric-grid">${metric("Empresas ativas", references.companies.filter((item) => item.is_active).length, "building")}${metric("Posições disponíveis", active.reduce((total, item) => total + Math.max(item.quantity - (filledMap.get(item.id) || 0), 0), 0), "kanban")}${metric("Candidatos", (candidates.data || []).filter((item) => item.status !== "archived").length, "users")}${metric("Em seleção", activeApplications.length, "tasks")}</section>
+    <nav class="operations-tabs" aria-label="Áreas da gestão de vagas">${tabs.map(([value, label, iconName, count]) => `<button class="${state.vacancyTab === value ? "active" : ""}" data-vacancy-tab="${value}">${icon(iconName)} ${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>
+    ${panel}`;
 }
 
 async function renderPartnerships(content) {
-  const [agreements, references] = await Promise.all([supabase.from("partnership_agreements").select("*").order("created_at", { ascending: false }), loadOperationalReferences()]);
+  const [agreements, references] = await Promise.all([
+    supabase.from("partnership_agreements").select("*").order("created_at", { ascending: false }),
+    loadOperationalReferences(),
+  ]);
   if (agreements.error) throw agreements.error;
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  content.innerHTML = `${pageHead("Parcerias e jovens", "Diferencie o contrato de parceria com a empresa do contrato individual de cada jovem.", `<button class="btn btn-primary" data-dialog="partnership">${icon("plus")} Nova parceria</button>`)}
-    <section class="card"><div class="people-list">${(agreements.data || []).length ? agreements.data.map((item) => operationalRow(companyMap.get(item.company_id) || "Empresa", `${item.title} · ${item.start_date ? formatDate(item.start_date) : "início não informado"}${item.end_date ? ` até ${formatDate(item.end_date)}` : ""}`, item.status)).join("") : emptyState("Nenhuma parceria cadastrada", "Os contratos de parceria aparecerão aqui. Os contratos dos jovens seguem no Departamento Pessoal.")}</div></section>`;
+  const activeYoung = new Map();
+  for (const apprentice of references.apprentices) {
+    if (apprentice.company_id) activeYoung.set(apprentice.company_id, (activeYoung.get(apprentice.company_id) || 0) + 1);
+  }
+  const statusLabels = { draft: "Rascunho", active: "Ativa", expiring: "Próxima do fim", ended: "Encerrada", cancelled: "Cancelada" };
+  content.innerHTML = `${pageHead("Parcerias e jovens", "Acompanhe os convênios com as empresas e os jovens vinculados a cada parceira.", `<button class="btn btn-primary" data-dialog="partnership">${icon("plus")} Nova parceria</button>`)}
+    <section class="metric-grid three">${metric("Parcerias ativas", (agreements.data || []).filter((item) => item.status === "active").length, "building")}${metric("Jovens vinculados", references.apprentices.filter((item) => item.company_id).length, "users")}${metric("Parcerias a vencer", (agreements.data || []).filter((item) => item.status === "expiring").length, "alert")}</section>
+    <section class="card"><div class="people-list">${(agreements.data || []).length ? agreements.data.map((item) => operationalRow(companyMap.get(item.company_id) || "Empresa", `${item.title} · ${activeYoung.get(item.company_id) || 0} jovem(ns) ativo(s) · ${item.start_date ? formatDate(item.start_date) : "início não informado"}${item.end_date ? ` até ${formatDate(item.end_date)}` : ""}`, statusLabels[item.status] || item.status, `<button class="btn btn-small btn-secondary" data-edit-partnership="${item.id}">${icon("edit")} Alterar</button>`)).join("") : emptyState("Nenhuma parceria cadastrada", "Registre o convênio firmado com uma empresa parceira.", `<button class="btn btn-primary" data-dialog="partnership">Registrar parceria</button>`)}</div></section>`;
 }
 
 async function renderAdmissions(content) {
@@ -1263,11 +1436,14 @@ async function renderAdmissions(content) {
     current.complete += item.is_required && item.is_completed ? 1 : 0;
     checklistMap.set(item.admission_id, current);
   }
-  content.innerHTML = `${pageHead("Admissões", "Abra o processo uma vez e acompanhe documentos, exame, contrato, matrícula e contabilidade.", `<button class="btn btn-primary" data-dialog="admission">${icon("plus")} Nova admissão</button>`)}
-    <section class="card"><div class="people-list">${(admissions || []).length ? admissions.map((item) => {
+  const openAdmissions = (admissions || []).filter((item) => !["completed", "cancelled"].includes(item.status));
+  const pendingDocuments = (admissions || []).filter((item) => ["approved", "documents_pending"].includes(item.status));
+  content.innerHTML = `${pageHead("Admissões", "Acompanhe cada aprovado até a entrada do jovem, com checklist e esteira sincronizados.", `<button class="btn btn-primary" data-dialog="admission">${icon("plus")} Nova admissão</button>`)}
+    <section class="metric-grid three">${metric("Em andamento", openAdmissions.length, "tasks")}${metric("Com documentos pendentes", pendingDocuments.length, "upload")}${metric("Concluídas", (admissions || []).filter((item) => item.status === "completed").length, "check")}</section>
+    <section class="card"><div class="people-list workflow-list">${(admissions || []).length ? admissions.map((item) => {
       const count = checklistMap.get(item.id) || { required: 0, complete: 0 };
       const detail = `${companyMap.get(item.company_id) || "Empresa não informada"} · início previsto ${item.target_start_date ? formatDate(item.target_start_date) : "não definido"} · checklist ${count.complete}/${count.required}`;
-      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, item.status, `<button class="btn btn-small btn-secondary" data-edit-admission="${item.id}">${icon("edit")} Abrir</button>`);
+      return `<article class="workflow-record"><div class="workflow-record-head"><div><h3>${escapeHtml(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado")}</h3><p>${escapeHtml(detail)}</p></div><div class="person-actions"><span class="status status-draft">${escapeHtml(admissionStatusLabels[item.status] || item.status)}</span><button class="btn btn-small btn-secondary" data-edit-admission="${item.id}">${icon("edit")} Abrir</button></div></div>${workflowProgress(admissionStatusLabels, item.status)}</article>`;
     }).join("") : emptyState("Nenhuma admissão aberta", "Crie a primeira admissão para gerar o checklist operacional e acompanhar cada etapa.", `<button class="btn btn-primary" data-dialog="admission">Nova admissão</button>`)}</div></section>`;
 }
 
@@ -1279,11 +1455,18 @@ async function renderContracts(content) {
   const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
   const canManageContracts = hasPermission("contracts.manage");
-  content.innerHTML = `${pageHead("Contratos", "Acompanhe vigência e organize os próximos encerramentos.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">${icon("plus")} Novo contrato</button>` : "")}
+  const activeContracts = (contracts || []).filter((item) => item.status === "active");
+  const daysRemaining = (item) => item.end_date ? Math.ceil((new Date(`${item.end_date}T23:59:59`).getTime() - Date.now()) / 86400000) : null;
+  const due90 = activeContracts.filter((item) => daysRemaining(item) >= 0 && daysRemaining(item) <= 90);
+  const due30 = activeContracts.filter((item) => daysRemaining(item) >= 0 && daysRemaining(item) <= 30);
+  const contractLabels = { scheduled: "A iniciar", active: "Ativo", closing: "Encerramento", ended: "Encerrado", cancelled: "Cancelado" };
+  content.innerHTML = `${pageHead("Contratos", "Acompanhe vigência e receba alertas nos marcos de 90, 60, 30, 15 e 7 dias.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">${icon("plus")} Novo contrato</button>` : "")}
+    <section class="metric-grid">${metric("Ativos", activeContracts.length, "calendar")}${metric("Vencem em até 90 dias", due90.length, "history")}${metric("Vencem em até 30 dias", due30.length, "alert")}${metric("Encerrados", (contracts || []).filter((item) => item.status === "ended").length, "check")}</section>
     <section class="card"><div class="people-list">${(contracts || []).length ? contracts.map((item) => {
-      const endsSoon = item.status === "active" && item.end_date && new Date(`${item.end_date}T23:59:59`).getTime() - Date.now() <= 30 * 86400000;
+      const remaining = daysRemaining(item);
       const detail = `${companyMap.get(item.company_id) || "Empresa não informada"} · ${formatDate(item.start_date)} a ${formatDate(item.end_date)}${item.position_title ? ` · ${item.position_title}` : ""}`;
-      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, endsSoon ? "Vence em até 30 dias" : item.status, canManageContracts ? `<button class="btn btn-small btn-secondary" data-edit-contract="${item.id}">${icon("edit")} Alterar</button>` : "");
+      const status = item.status === "active" && remaining !== null && remaining >= 0 && remaining <= 90 ? `Vence em ${remaining} dia(s)` : contractLabels[item.status] || item.status;
+      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, status, canManageContracts ? `<button class="btn btn-small btn-secondary" data-edit-contract="${item.id}">${icon("edit")} Alterar</button>` : "");
     }).join("") : emptyState("Nenhum contrato cadastrado", canManageContracts ? "Registre o contrato para o Portal avisar sobre a vigência e concentrar os documentos." : "Nenhum contrato está disponível para consulta.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">Cadastrar contrato</button>` : "")}</div></section>`;
 }
 
@@ -1303,7 +1486,8 @@ async function renderTerminations(content) {
   if (error) throw error;
   const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  content.innerHTML = `${pageHead("Desligamentos", "Preserve o histórico e acompanhe exame, documentos, contabilidade e encerramento.", `<button class="btn btn-primary" data-dialog="termination">${icon("plus")} Abrir desligamento</button>`)}<section class="card"><div class="people-list">${(cases || []).length ? cases.map((item) => operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", `${companyMap.get(item.company_id) || "Empresa não informada"} · ${item.reason || "Motivo não informado"}`, item.status, `<button class="btn btn-small btn-secondary" data-edit-termination="${item.id}">${icon("edit")} Abrir</button>`)).join("") : emptyState("Nenhum desligamento aberto", "Abra o processo antes de iniciar as providências para manter tudo auditável.", `<button class="btn btn-primary" data-dialog="termination">Abrir desligamento</button>`)}</div></section>`;
+  const openCases = (cases || []).filter((item) => !["completed", "cancelled"].includes(item.status));
+  content.innerHTML = `${pageHead("Desligamentos", "Preserve o histórico e acompanhe exame, documentos, contabilidade e encerramento.", `<button class="btn btn-primary" data-dialog="termination">${icon("plus")} Abrir desligamento</button>`)}<section class="metric-grid three">${metric("Em andamento", openCases.length, "tasks")}${metric("Aguardando contabilidade", (cases || []).filter((item) => item.status === "accounting").length, "mail")}${metric("Concluídos", (cases || []).filter((item) => item.status === "completed").length, "check")}</section><section class="card"><div class="people-list workflow-list">${(cases || []).length ? cases.map((item) => `<article class="workflow-record"><div class="workflow-record-head"><div><h3>${escapeHtml(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado")}</h3><p>${escapeHtml(`${companyMap.get(item.company_id) || "Empresa não informada"} · ${item.reason || "Motivo não informado"}${item.effective_date ? ` · previsto para ${formatDate(item.effective_date)}` : ""}`)}</p></div><div class="person-actions"><span class="status status-draft">${escapeHtml(terminationStatusLabels[item.status] || item.status)}</span><button class="btn btn-small btn-secondary" data-edit-termination="${item.id}">${icon("edit")} Abrir</button></div></div>${workflowProgress(terminationStatusLabels, item.status)}</article>`).join("") : emptyState("Nenhum desligamento aberto", "Abra o processo antes de iniciar as providências para manter tudo auditável.", `<button class="btn btn-primary" data-dialog="termination">Abrir desligamento</button>`)}</div></section>`;
 }
 
 async function renderDocuments(content) {
@@ -1943,12 +2127,96 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
-  if (type === "candidate" || type === "vacancy" || type === "application" || type === "partnership") {
+  if (["candidate", "vacancy", "application", "partnership", "candidate-conversion"].includes(type)) {
     const references = await loadOperationalReferences();
-    if (type === "candidate") body = `<form id="candidate-form" class="dialog-form"><label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus /></label><div class="form-grid two-columns"><label>E-mail<input name="email" type="email" /></label><label>Telefone<input name="phone" /></label><label>Cidade<input name="city" maxlength="120" /></label><label>Status<select name="status"><option value="new">Novo</option><option value="screening">Triagem</option><option value="interview">Entrevista</option></select></label></div><label>Observações<textarea name="notes" rows="4"></textarea></label><button class="btn btn-primary">Cadastrar candidato</button></form>`;
-    if (type === "vacancy") body = `<form id="vacancy-form" class="dialog-form"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.filter((c) => c.is_active).map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select></label><label>Nome da vaga<input name="title" required maxlength="180" placeholder="Ex.: Jovem aprendiz administrativo" /></label><div class="form-grid two-columns"><label>Quantidade<input name="quantity" type="number" min="1" value="1" required /></label><label>Prazo<input name="dueDate" type="date" /></label><label>Jornada<input name="workload" maxlength="120" placeholder="Ex.: 6 horas" /></label></div><label>Requisitos<textarea name="requirements" rows="4"></textarea></label><button class="btn btn-primary">Abrir vaga</button></form>`;
-    if (type === "application") { const [candidates, vacancies] = await Promise.all([supabase.from("candidates").select("id,full_name").not("status", "in", "(rejected,hired,archived)").order("full_name"), supabase.from("job_vacancies").select("id,title,company_id").eq("status", "open")]); const companyMap = new Map(references.companies.map((c) => [c.id,c.name])); body = `<form id="application-form" class="dialog-form"><label>Candidato<select name="candidateId" required><option value="">Selecione</option>${(candidates.data||[]).map((c)=>`<option value="${c.id}">${escapeHtml(c.full_name)}</option>`).join("")}</select></label><label>Vaga<select name="vacancyId" required><option value="">Selecione</option>${(vacancies.data||[]).map((v)=>`<option value="${v.id}">${escapeHtml(v.title)} · ${escapeHtml(companyMap.get(v.company_id)||"")}</option>`).join("")}</select></label><button class="btn btn-primary">Iniciar seleção</button></form>`; }
-    if (type === "partnership") body = `<form id="partnership-form" class="dialog-form"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>Início<input name="startDate" type="date" /></label><label>Término<input name="endDate" type="date" /></label></div><label>Observações<textarea name="notes" rows="4"></textarea></label><button class="btn btn-primary">Registrar parceria</button></form>`;
+    if (type === "candidate") {
+      let item = {};
+      let candidateDocuments = [];
+      let events = [];
+      let selections = [];
+      if (recordId) {
+        const [candidateResult, documentResult, eventResult, selectionResult] = await Promise.all([
+          supabase.from("candidates").select("*").eq("id", recordId).single(),
+          supabase.from("candidate_documents").select("*").eq("candidate_id", recordId).order("created_at", { ascending: false }),
+          supabase.from("recruitment_events").select("*").eq("candidate_id", recordId).order("created_at", { ascending: false }).limit(60),
+          supabase.from("vacancy_applications").select("id,vacancy_id,status,updated_at").eq("candidate_id", recordId).order("updated_at", { ascending: false }),
+        ]);
+        if (candidateResult.error || documentResult.error || eventResult.error || selectionResult.error) throw candidateResult.error || documentResult.error || eventResult.error || selectionResult.error;
+        item = candidateResult.data;
+        candidateDocuments = documentResult.data || [];
+        events = eventResult.data || [];
+        selections = selectionResult.data || [];
+      }
+      const { data: vacancies } = recordId ? await supabase.from("job_vacancies").select("id,title,company_id") : { data: [] };
+      const vacancyMap = new Map((vacancies || []).map((vacancy) => [vacancy.id, vacancy]));
+      const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
+      const eventLabels = { "candidate.created": "Candidato cadastrado", "candidate.updated": "Dados atualizados", "candidate.status_changed": "Situação atualizada", "application.created": "Seleção iniciada", "application.updated": "Seleção atualizada", "application.status_changed": "Etapa da seleção atualizada" };
+      body = `<form id="candidate-form" class="dialog-form wide-form"><input type="hidden" name="candidateId" value="${escapeHtml(item.id || "")}" />
+        <div class="form-section"><span>Dados do candidato</span></div><div class="form-grid two-columns">
+          <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus value="${escapeHtml(item.full_name || "")}" /></label>
+          <label>CPF<input name="cpf" maxlength="18" inputmode="numeric" value="${escapeHtml(item.cpf || "")}" /></label>
+          <label>E-mail<input name="email" type="email" maxlength="254" value="${escapeHtml(item.email || "")}" /></label>
+          <label>Telefone<input name="phone" maxlength="20" inputmode="tel" value="${escapeHtml(item.phone || "")}" /></label>
+          <label>Data de nascimento<input name="birthDate" type="date" value="${escapeHtml(item.birth_date || "")}" /></label>
+          <label>Escolaridade<input name="educationLevel" maxlength="120" value="${escapeHtml(item.education_level || "")}" placeholder="Ex.: Ensino médio cursando" /></label>
+          <label>Cidade<input name="city" maxlength="120" value="${escapeHtml(item.city || "")}" /></label>
+          <label>Bairro<input name="neighborhood" maxlength="120" value="${escapeHtml(item.neighborhood || "")}" /></label>
+          <label>Origem do candidato<input name="source" maxlength="120" value="${escapeHtml(item.source || "")}" placeholder="Ex.: Indicação, site, escola" /></label>
+          <label>Situação<select name="status">${selectOptions(Object.fromEntries(Object.entries(candidateStatusLabels).filter(([value]) => value !== "hired")), item.status || "new")}${item.status === "hired" ? `<option value="hired" selected>Convertido em jovem</option>` : ""}</select></label>
+        </div><label>Observações internas<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>
+        <div class="form-section"><span>Currículo e documentos</span></div>
+        <div class="form-grid two-columns"><label>Adicionar arquivo<input name="file" type="file" accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /></label><label>Tipo do arquivo<select name="documentCategory"><option value="resume">Currículo</option><option value="identification">Identificação</option><option value="school">Escolaridade</option><option value="certificate">Certificado</option><option value="other">Outro</option></select></label></div>
+        <label>Título do arquivo<input name="documentTitle" maxlength="180" placeholder="Opcional: usa o nome do arquivo" /></label>
+        ${recordId ? `<div class="compact-record-list">${candidateDocuments.length ? candidateDocuments.map((document) => `<div><span>${icon("upload")}<strong>${escapeHtml(document.title)}</strong><small>${escapeHtml(document.category)} · ${formatDate(document.created_at, true)}</small></span><button type="button" class="btn btn-small btn-secondary" data-download-candidate-document="${document.id}">Baixar</button></div>`).join("") : `<p class="form-note">Nenhum arquivo enviado para este candidato.</p>`}</div>` : `<p class="form-note">Você poderá adicionar outros arquivos ao abrir o candidato novamente.</p>`}
+        ${recordId ? `<div class="form-section"><span>Seleções e histórico</span></div><div class="candidate-history-grid"><div><h3>Vagas</h3>${selections.length ? selections.map((selection) => { const vacancy = vacancyMap.get(selection.vacancy_id); return `<p><strong>${escapeHtml(vacancy?.title || "Vaga")}</strong><small>${escapeHtml(companyMap.get(vacancy?.company_id) || "Empresa")} · ${escapeHtml(applicationStatusLabels[selection.status] || selection.status)}</small></p>`; }).join("") : `<p class="form-note">Ainda não participa de nenhuma seleção.</p>`}</div><div><h3>Histórico</h3>${events.length ? events.map((event) => `<p><strong>${escapeHtml(eventLabels[event.event_type] || event.event_type)}</strong><small>${event.from_status && event.to_status ? `${escapeHtml(applicationStatusLabels[event.from_status] || candidateStatusLabels[event.from_status] || event.from_status)} → ${escapeHtml(applicationStatusLabels[event.to_status] || candidateStatusLabels[event.to_status] || event.to_status)} · ` : ""}${formatDate(event.created_at, true)}</small>${event.notes ? `<em>${escapeHtml(event.notes)}</em>` : ""}</p>`).join("") : `<p class="form-note">O histórico será formado conforme o processo avançar.</p>`}</div></div>` : ""}
+        <button class="btn btn-primary" type="submit">${recordId ? "Salvar candidato" : "Cadastrar candidato"}</button></form>`;
+    }
+    if (type === "vacancy") {
+      let item = {};
+      if (recordId) {
+        const { data, error } = await supabase.from("job_vacancies").select("*").eq("id", recordId).single();
+        if (error) throw error;
+        item = data;
+      }
+      body = `<form id="vacancy-form" class="dialog-form wide-form"><input type="hidden" name="vacancyId" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.filter((company) => company.is_active || company.id === item.company_id).map((company) => `<option value="${company.id}" ${company.id === item.company_id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " · inativa"}</option>`).join("")}</select></label><label>Nome da vaga<input name="title" required maxlength="180" value="${escapeHtml(item.title || "")}" placeholder="Ex.: Jovem aprendiz administrativo" /></label><label>Quantidade<input name="quantity" type="number" min="1" max="999" value="${escapeHtml(item.quantity || 1)}" required /></label><label>Prazo<input name="dueDate" type="date" value="${escapeHtml(item.due_date || "")}" /></label><label>Jornada<input name="workload" maxlength="120" value="${escapeHtml(item.workload || "")}" placeholder="Ex.: 6 horas diárias" /></label><label>Modelo de trabalho<input name="workModel" maxlength="80" value="${escapeHtml(item.work_model || "")}" placeholder="Ex.: Presencial" /></label><label>Local<input name="location" maxlength="180" value="${escapeHtml(item.location || "")}" placeholder="Cidade ou unidade" /></label><label>Salário mensal<input name="monthlySalary" type="number" min="0" step="0.01" value="${escapeHtml(item.monthly_salary || "")}" /></label><label>Situação<select name="status">${selectOptions(vacancyStatusLabels, item.status || "open")}</select></label></div><label>Requisitos<textarea name="requirements" rows="4" maxlength="12000">${escapeHtml(item.requirements || "")}</textarea></label><label>Observações internas<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar vaga" : "Abrir vaga"}</button></form>`;
+    }
+    if (type === "application") {
+      let item = {};
+      if (recordId) {
+        const { data, error } = await supabase.from("vacancy_applications").select("*").eq("id", recordId).single();
+        if (error) throw error;
+        item = data;
+      }
+      const [candidates, vacancies] = await Promise.all([
+        supabase.from("candidates").select("id,full_name,status").not("status", "in", "(hired,archived)").order("full_name"),
+        supabase.from("job_vacancies").select("id,title,company_id,status").in("status", ["open", "paused"]),
+      ]);
+      if (candidates.error || vacancies.error) throw candidates.error || vacancies.error;
+      const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
+      const candidateOptions = (candidates.data || []).concat(item.candidate_id && !(candidates.data || []).some((candidate) => candidate.id === item.candidate_id) ? [{ id: item.candidate_id, full_name: "Candidato atual" }] : []);
+      const vacancyOptions = (vacancies.data || []).concat(item.vacancy_id && !(vacancies.data || []).some((vacancy) => vacancy.id === item.vacancy_id) ? [{ id: item.vacancy_id, title: "Vaga atual", company_id: null }] : []);
+      body = `<form id="application-form" class="dialog-form wide-form"><input type="hidden" name="applicationId" value="${escapeHtml(item.id || "")}" />${recordId ? `<input type="hidden" name="candidateId" value="${item.candidate_id}" /><input type="hidden" name="vacancyId" value="${item.vacancy_id}" />` : ""}<div class="form-grid two-columns"><label>Candidato<select name="candidateIdSelect" ${recordId ? "disabled" : "required"}><option value="">Selecione</option>${candidateOptions.map((candidate) => `<option value="${candidate.id}" ${candidate.id === item.candidate_id ? "selected" : ""}>${escapeHtml(candidate.full_name)}</option>`).join("")}</select></label><label>Vaga<select name="vacancyIdSelect" ${recordId ? "disabled" : "required"}><option value="">Selecione</option>${vacancyOptions.map((vacancy) => `<option value="${vacancy.id}" ${vacancy.id === item.vacancy_id ? "selected" : ""}>${escapeHtml(vacancy.title)} · ${escapeHtml(companyMap.get(vacancy.company_id) || "")}</option>`).join("")}</select></label><label>Etapa<select name="status">${selectOptions(Object.fromEntries(Object.entries(applicationStatusLabels).filter(([value]) => value !== "hired")), item.status || "received")}${item.status === "hired" ? `<option value="hired" selected>Admissão iniciada</option>` : ""}</select></label><label>Entrevista na empresa<input name="companyInterviewAt" type="datetime-local" value="${formatDateTimeInput(item.company_interview_at)}" /></label></div>${recordId ? workflowProgress(applicationStatusLabels, item.status) : ""}<label>Observações da CAFCM<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><label>Retorno da empresa<textarea name="companyFeedback" rows="4" maxlength="12000">${escapeHtml(item.company_feedback || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar seleção" : "Iniciar seleção"}</button></form>`;
+    }
+    if (type === "candidate-conversion") {
+      const { data: application, error } = await supabase.from("vacancy_applications").select("id,candidate_id,vacancy_id,status").eq("id", recordId).single();
+      if (error) throw error;
+      const [{ data: candidate }, { data: vacancy }] = await Promise.all([
+        supabase.from("candidates").select("full_name,email").eq("id", application.candidate_id).single(),
+        supabase.from("job_vacancies").select("title,company_id").eq("id", application.vacancy_id).single(),
+      ]);
+      const company = references.companies.find((item) => item.id === vacancy.company_id);
+      body = `<form id="candidate-conversion-form" class="dialog-form"><input type="hidden" name="applicationId" value="${application.id}" /><div class="conversion-summary"><span>${icon("users")}</span><div><strong>${escapeHtml(candidate.full_name)}</strong><small>${escapeHtml(candidate.email || "E-mail não cadastrado")}</small><small>${escapeHtml(vacancy.title)} · ${escapeHtml(company?.name || "Empresa")}</small></div></div><label>Data prevista para início<input name="targetStartDate" type="date" /></label><div class="dialog-instructions">Ao confirmar, o Portal cria ou atualiza o acesso de jovem aprendiz, envia o convite por e-mail quando necessário, transfere os dados do candidato e abre uma admissão com checklist. Nenhum dado precisa ser digitado novamente.</div><button class="btn btn-primary" type="submit">Confirmar e abrir admissão</button></form>`;
+    }
+    if (type === "partnership") {
+      let item = {};
+      if (recordId) {
+        const { data, error } = await supabase.from("partnership_agreements").select("*").eq("id", recordId).single();
+        if (error) throw error;
+        item = data;
+      }
+      const statusLabels = { draft: "Rascunho", active: "Ativa", expiring: "Próxima do fim", ended: "Encerrada", cancelled: "Cancelada" };
+      body = `<form id="partnership-form" class="dialog-form"><input type="hidden" name="partnershipId" value="${escapeHtml(item.id || "")}" /><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${company.id === item.company_id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Título<input name="title" required maxlength="180" value="${escapeHtml(item.title || "Contrato de parceria")}" /></label><div class="form-grid two-columns"><label>Início<input name="startDate" type="date" value="${escapeHtml(item.start_date || "")}" /></label><label>Término<input name="endDate" type="date" value="${escapeHtml(item.end_date || "")}" /></label><label>Situação<select name="status">${selectOptions(statusLabels, item.status || "active")}</select></label></div><label>Observações<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary">${recordId ? "Salvar parceria" : "Registrar parceria"}</button></form>`;
+    }
   }
 
   if (type === "person") {
@@ -2148,8 +2416,7 @@ async function openDialog(type, recordId = null) {
       const item = await selectRecord("admission_cases");
       const checklist = recordId ? await supabase.from("admission_checklist_items").select("*").eq("admission_id", recordId).order("position") : { data: [] };
       if (checklist.error) throw checklist.error;
-      const admissionStatusOptions = [["approved", "Aprovado"], ["documents_pending", "Documentos pendentes"], ["documents_complete", "Documentos completos"], ["medical_exam", "Exame admissional"], ["contract_preparation", "Contrato em elaboração"], ["signatures_pending", "Aguardando assinaturas"], ["accounting", "Contabilidade / eSocial"], ["enrollment", "Matrícula / curso"], ["completed", "Admissão concluída"]];
-      body = `<form id="admission-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Início previsto<input name="targetStartDate" type="date" value="${escapeHtml(item.target_start_date || "")}" /></label><label>Status<select name="status">${admissionStatusOptions.map(([value, label]) => `<option value="${value}" ${item.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label></div><label>Observações<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<label>Checklist da admissão<div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="check-${check.id}" ${check.is_completed ? "checked" : ""} /> ${escapeHtml(check.title)}</label>`).join("") || "Nenhum item criado"}</div></label>` : `<p class="form-note">Ao abrir a admissão, o Portal cria automaticamente o checklist padrão, uma pendência de acompanhamento e o envio à contabilidade. Depois você pode marcar cada item conforme concluir.</p>`}<button class="btn btn-primary" type="submit">${recordId ? "Salvar admissão" : "Abrir admissão"}</button></form>`;
+      body = `<form id="admission-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Início previsto<input name="targetStartDate" type="date" value="${escapeHtml(item.target_start_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(admissionStatusLabels, item.status || "approved")}</select></label></div>${recordId ? workflowProgress(admissionStatusLabels, item.status) : ""}<label>Observações<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<div class="form-section"><span>Checklist da admissão</span></div><div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="check-${check.id}" ${check.is_completed ? "checked" : ""} /> <span>${escapeHtml(check.title)}</span></label>`).join("") || "Nenhum item criado"}</div><label>Adicionar itens ao checklist<textarea name="newChecklistItems" rows="3" maxlength="2000" placeholder="Digite um item por linha"></textarea><small>Os itens são adicionados sem apagar o checklist já preenchido.</small></label>` : `<p class="form-note">Ao abrir a admissão, o Portal cria automaticamente o checklist padrão, uma pendência de acompanhamento e o envio à contabilidade. Depois você pode marcar e personalizar os itens.</p>`}<button class="btn btn-primary" type="submit">${recordId ? "Salvar admissão" : "Abrir admissão"}</button></form>`;
     }
     if (type === "contract") {
       const item = await selectRecord("contracts");
@@ -2259,10 +2526,11 @@ async function openDialog(type, recordId = null) {
     termination: recordId ? "Alterar desligamento" : "Abrir desligamento",
     accounting: recordId ? "Alterar envio" : "Novo envio à contabilidade",
     document: "Enviar documento",
-    candidate: "Cadastrar candidato",
-    vacancy: "Abrir vaga",
-    application: "Iniciar processo seletivo",
-    partnership: "Registrar parceria",
+    candidate: recordId ? "Candidato e histórico" : "Cadastrar candidato",
+    vacancy: recordId ? "Alterar vaga" : "Abrir vaga",
+    application: recordId ? "Atualizar processo seletivo" : "Iniciar processo seletivo",
+    "candidate-conversion": "Iniciar admissão do aprovado",
+    partnership: recordId ? "Alterar parceria" : "Registrar parceria",
     course: recordId ? "Alterar curso" : "Criar curso",
     invite: "Criar pessoa e enviar convite",
     lesson: recordId ? "Alterar aula" : "Adicionar aula",
@@ -2271,7 +2539,7 @@ async function openDialog(type, recordId = null) {
     enrollment: "Nova matrícula",
     response: "Responder atividade",
   };
-  const wideDialog = ["company", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
+  const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
   root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>${body}</section></div>`;
 }
 
@@ -2492,6 +2760,11 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.authMode) return renderLogin(target.dataset.authMode);
   if (target.hasAttribute("data-open-menu")) return document.querySelector(".portal-shell")?.classList.add("menu-open");
   if (target.hasAttribute("data-close-menu")) return document.querySelector(".portal-shell")?.classList.remove("menu-open");
+  if (target.dataset.vacancyTab) {
+    state.vacancyTab = target.dataset.vacancyTab;
+    state.vacancyStatus = "";
+    return renderView();
+  }
   if (target.dataset.nav) return navigate(target.dataset.nav);
   if (target.hasAttribute("data-reload")) return renderPortal();
   if (target.hasAttribute("data-logout")) {
@@ -2537,6 +2810,12 @@ app.addEventListener("click", async (event) => {
     state.pipelineResponsible = "";
     state.pipelineCompany = "";
     state.pipelineSort = "recent";
+    return renderView();
+  }
+  if (target.hasAttribute("data-clear-vacancy-filters")) {
+    state.vacancySearch = "";
+    state.vacancyStatus = "";
+    state.vacancyCompany = "";
     return renderView();
   }
   if (target.dataset.editPipelineItem) return openDialog("pipeline-item", target.dataset.editPipelineItem);
@@ -2592,6 +2871,26 @@ app.addEventListener("click", async (event) => {
     return navigate(target.dataset.notificationTarget || "notifications");
   }
   if (target.dataset.editCompany) return openDialog("company", target.dataset.editCompany);
+  if (target.dataset.editCandidate) return openDialog("candidate", target.dataset.editCandidate);
+  if (target.dataset.editVacancy) return openDialog("vacancy", target.dataset.editVacancy);
+  if (target.dataset.editApplication) return openDialog("application", target.dataset.editApplication);
+  if (target.dataset.editPartnership) return openDialog("partnership", target.dataset.editPartnership);
+  if (target.dataset.convertCandidate) return openDialog("candidate-conversion", target.dataset.convertCandidate);
+  if (target.dataset.downloadCandidateDocument) {
+    const { data, error } = await supabase.from("candidate_documents").select("storage_path").eq("id", target.dataset.downloadCandidateDocument).single();
+    if (error) return showToast(friendlyError(error), "error");
+    const { data: signed, error: signedError } = await supabase.storage.from("cafcm-recruitment").createSignedUrl(data.storage_path, 60);
+    if (signedError) return showToast(friendlyError(signedError), "error");
+    window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (target.dataset.archiveCandidate) {
+    const archived = target.dataset.candidateArchived === "true";
+    const { error } = await supabase.from("candidates").update({ status: archived ? "new" : "archived", archived_at: archived ? null : new Date().toISOString() }).eq("id", target.dataset.archiveCandidate);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast(archived ? "Candidato reativado." : "Candidato arquivado com o histórico preservado.");
+    return renderView();
+  }
   if (target.dataset.editPerson) return openDialog("person", target.dataset.editPerson);
   if (target.dataset.personHistory) return openDialog("person-history", target.dataset.personHistory);
   if (target.dataset.editCourse) return openDialog("course", target.dataset.editCourse);
@@ -2884,6 +3183,12 @@ app.addEventListener("change", (event) => {
     return renderView();
   }
 
+  if (event.target.matches("[data-vacancy-filter]")) {
+    const stateKey = event.target.dataset.vacancyFilter === "status" ? "vacancyStatus" : "vacancyCompany";
+    state[stateKey] = event.target.value;
+    return renderView();
+  }
+
   if (event.target.matches("[data-move-process]")) {
     const select = event.target;
     select.disabled = true;
@@ -2935,10 +3240,17 @@ app.addEventListener("change", (event) => {
 });
 
 app.addEventListener("input", (event) => {
-  if (!event.target.matches("[data-pipeline-search]")) return;
-  state.pipelineSearch = event.target.value;
-  window.clearTimeout(app.pipelineSearchTimer);
-  app.pipelineSearchTimer = window.setTimeout(() => renderView(), 250);
+  if (event.target.matches("[data-pipeline-search]")) {
+    state.pipelineSearch = event.target.value;
+    window.clearTimeout(app.pipelineSearchTimer);
+    app.pipelineSearchTimer = window.setTimeout(() => renderView(), 250);
+    return;
+  }
+  if (event.target.matches("[data-vacancy-search]")) {
+    state.vacancySearch = event.target.value;
+    window.clearTimeout(app.vacancySearchTimer);
+    app.vacancySearchTimer = window.setTimeout(() => renderView(), 250);
+  }
 });
 
 app.addEventListener("dragstart", (event) => {
@@ -3169,20 +3481,82 @@ app.addEventListener("submit", async (event) => {
     }
 
     if (form.id === "candidate-form") {
-      const { error } = await supabase.from("candidates").insert({ full_name: String(values.fullName).trim(), email: String(values.email || "").trim() || null, phone: String(values.phone || "").trim() || null, city: String(values.city || "").trim(), status: values.status, notes: String(values.notes || "").trim(), created_by: state.profile.id });
-      if (error) throw error; closeOverlay(); showToast("Candidato cadastrado."); return renderView();
+      const candidateId = String(values.candidateId || "");
+      const payload = {
+        full_name: String(values.fullName).trim(),
+        email: String(values.email || "").trim().toLowerCase() || null,
+        phone: String(values.phone || "").trim() || null,
+        cpf: digitsOnly(values.cpf) || null,
+        birth_date: values.birthDate || null,
+        education_level: String(values.educationLevel || "").trim(),
+        city: String(values.city || "").trim(),
+        neighborhood: String(values.neighborhood || "").trim(),
+        source: String(values.source || "").trim(),
+        status: values.status || "new",
+        archived_at: values.status === "archived" ? new Date().toISOString() : null,
+        notes: String(values.notes || "").trim(),
+      };
+      let savedId = candidateId;
+      if (candidateId) {
+        const { error } = await supabase.from("candidates").update(payload).eq("id", candidateId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from("candidates").insert({ ...payload, created_by: state.profile.id }).select("id").single();
+        if (error) throw error;
+        savedId = data.id;
+      }
+      const file = values.file;
+      if (file instanceof File && file.size) {
+        if (file.size > 25 * 1024 * 1024) throw new Error("O arquivo deve ter no máximo 25 MB.");
+        const cleanName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
+        const path = `${savedId}/${Date.now()}-${cleanName}`;
+        const { error: uploadError } = await supabase.storage.from("cafcm-recruitment").upload(path, file, { contentType: file.type, upsert: false });
+        if (uploadError) throw uploadError;
+        const { error: documentError } = await supabase.from("candidate_documents").insert({
+          candidate_id: savedId,
+          title: String(values.documentTitle || "").trim() || file.name.slice(0, 180),
+          category: values.documentCategory || "resume",
+          storage_path: path,
+          mime_type: file.type,
+          file_size: file.size,
+          uploaded_by: state.profile.id,
+        });
+        if (documentError) { await supabase.storage.from("cafcm-recruitment").remove([path]); throw documentError; }
+      }
+      closeOverlay(); showToast(candidateId ? "Candidato e histórico atualizados." : "Candidato cadastrado."); return renderView();
     }
     if (form.id === "vacancy-form") {
-      const { error } = await supabase.from("job_vacancies").insert({ company_id: values.companyId, title: String(values.title).trim(), quantity: Number(values.quantity || 1), due_date: values.dueDate || null, workload: String(values.workload || "").trim(), requirements: String(values.requirements || "").trim(), created_by: state.profile.id });
-      if (error) throw error; closeOverlay(); showToast("Vaga aberta."); return renderView();
+      const vacancyId = String(values.vacancyId || "");
+      const status = values.status || "open";
+      const payload = { company_id: values.companyId, title: String(values.title).trim(), quantity: Number(values.quantity || 1), due_date: values.dueDate || null, workload: String(values.workload || "").trim(), work_model: String(values.workModel || "").trim(), location: String(values.location || "").trim(), monthly_salary: valueOrNull(values.monthlySalary), requirements: String(values.requirements || "").trim(), notes: String(values.notes || "").trim(), status, closed_at: ["filled", "cancelled"].includes(status) ? new Date().toISOString() : null };
+      const query = vacancyId ? supabase.from("job_vacancies").update(payload).eq("id", vacancyId) : supabase.from("job_vacancies").insert({ ...payload, created_by: state.profile.id });
+      const { error } = await query;
+      if (error) throw error; closeOverlay(); showToast(vacancyId ? "Vaga atualizada." : "Vaga aberta."); return renderView();
     }
     if (form.id === "application-form") {
-      const { error } = await supabase.from("vacancy_applications").insert({ candidate_id: values.candidateId, vacancy_id: values.vacancyId });
-      if (error?.code === "23505") throw new Error("Este candidato já está nesta vaga."); if (error) throw error; closeOverlay(); showToast("Candidato incluído no processo seletivo."); return renderView();
+      const applicationId = String(values.applicationId || "");
+      const candidateId = values.candidateId || values.candidateIdSelect;
+      const vacancyId = values.vacancyId || values.vacancyIdSelect;
+      const payload = { candidate_id: candidateId, vacancy_id: vacancyId, status: values.status || "received", company_interview_at: values.companyInterviewAt ? new Date(String(values.companyInterviewAt)).toISOString() : null, notes: String(values.notes || "").trim(), company_feedback: String(values.companyFeedback || "").trim() };
+      const query = applicationId ? supabase.from("vacancy_applications").update(payload).eq("id", applicationId) : supabase.from("vacancy_applications").insert({ ...payload, created_by: state.profile.id });
+      const { error } = await query;
+      if (error?.code === "23505") throw new Error("Este candidato já está nesta vaga."); if (error) throw error; closeOverlay(); showToast(applicationId ? "Etapa da seleção atualizada." : "Candidato incluído no processo seletivo."); return renderView();
     }
     if (form.id === "partnership-form") {
-      const { error } = await supabase.from("partnership_agreements").insert({ company_id: values.companyId, start_date: values.startDate || null, end_date: values.endDate || null, notes: String(values.notes || "").trim(), created_by: state.profile.id });
-      if (error) throw error; closeOverlay(); showToast("Parceria registrada."); return renderView();
+      const partnershipId = String(values.partnershipId || "");
+      if (values.startDate && values.endDate && new Date(`${values.endDate}T00:00:00`) < new Date(`${values.startDate}T00:00:00`)) throw new Error("A data de término não pode ser anterior ao início.");
+      const payload = { company_id: values.companyId, title: String(values.title || "Contrato de parceria").trim(), status: values.status || "active", start_date: values.startDate || null, end_date: values.endDate || null, notes: String(values.notes || "").trim() };
+      const query = partnershipId ? supabase.from("partnership_agreements").update(payload).eq("id", partnershipId) : supabase.from("partnership_agreements").insert({ ...payload, created_by: state.profile.id });
+      const { error } = await query;
+      if (error) throw error; closeOverlay(); showToast(partnershipId ? "Parceria atualizada." : "Parceria registrada."); return renderView();
+    }
+    if (form.id === "candidate-conversion-form") {
+      const result = await callAdmin({ action: "convert_candidate", applicationId: values.applicationId, targetStartDate: values.targetStartDate || null }, true);
+      closeOverlay();
+      showToast(result.alreadyConverted ? "A admissão deste jovem já estava aberta." : result.invited ? "Jovem criado, convite enviado e admissão aberta." : "Jovem vinculado e admissão aberta.");
+      state.view = canAccessView("admissions") ? "admissions" : "vacancies";
+      state.vacancyTab = "applications";
+      return renderPortal();
     }
 
     if (form.id === "pipeline-item-form") {
@@ -3245,6 +3619,14 @@ app.addEventListener("submit", async (event) => {
             const { error } = await supabase.from("admission_checklist_items").update({ is_completed: complete }).eq("id", check.id);
             if (error) throw error;
           }
+        }
+        const newItems = String(values.newChecklistItems || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 25);
+        if (newItems.length) {
+          const { data: lastItems, error: lastItemsError } = await supabase.from("admission_checklist_items").select("position").eq("admission_id", id).order("position", { ascending: false }).limit(1);
+          if (lastItemsError) throw lastItemsError;
+          const startPosition = lastItems?.[0]?.position || 0;
+          const { error: insertItemsError } = await supabase.from("admission_checklist_items").insert(newItems.map((title, index) => ({ admission_id: id, title: title.slice(0, 300), position: startPosition + index + 1, is_required: true })));
+          if (insertItemsError) throw insertItemsError;
         }
       } else {
         const { data, error } = await supabase.from("admission_cases").insert({ ...payload, created_by: state.profile.id }).select("id").single();

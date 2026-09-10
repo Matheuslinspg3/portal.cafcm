@@ -9,6 +9,9 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Tarefas e Pendências:** responsáveis, prioridades, prazos, vínculos com processos e listas de verificação.
 - **Notificações:** avisos de atribuição e acesso direto ao item relacionado.
 - **Empresas e Jovens:** cadastros, vínculos, acompanhamento e histórico.
+- **Gestão de Vagas:** vagas, capacidade disponível, candidatos, currículos, encaminhamentos e retorno das empresas.
+- **Admissões e Contratos:** conversão do aprovado em jovem, checklist personalizável, vigência e alertas de 90, 60, 30, 15 e 7 dias.
+- **Desligamentos:** acompanhamento por etapas, documentos, contabilidade e encerramento auditável.
 - **Acadêmico:** cursos, aulas, linhas de aprendizagem, atividades, matrículas e progresso.
 - **Gestão:** pessoas, convites, credenciais e auditoria.
 
@@ -87,6 +90,7 @@ Requer Node.js 22 ou mais recente.
 ```bash
 npm ci
 npm run build
+npm test
 ```
 
 Sirva a pasta `dist` por HTTP. O portal usa a origem atual do navegador para montar links de autenticação, portanto funciona em produção e em ambiente local sem alterar o código-fonte.
@@ -111,6 +115,10 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 14. `supabase/migrations/20260910150000_vacancy_management.sql`
 15. `supabase/migrations/20260910154922_department_permissions.sql`
 16. `supabase/migrations/20260910162500_administrative_foreign_key_indexes.sql`
+17. `supabase/migrations/20260910171000_phase_two_operations.sql`
+18. `supabase/migrations/20260910173500_phase_two_foreign_key_indexes.sql`
+
+O teste transacional de banco está em `supabase/tests/phase_two_operations.test.sql` e pode ser executado com `supabase test db` em um ambiente local do Supabase.
 
 Revise os scripts antes de aplicá-los a uma base que já possui dados. A base CAFCM atual já recebeu essas evoluções; não execute novamente sem conferir o histórico de migrações.
 
