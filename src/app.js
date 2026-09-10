@@ -117,6 +117,10 @@ const navigation = {
       ["tasks", "Tarefas e Pendências", "tasks"],
       ["notifications", "Notificações", "bell"],
     ] },
+    { label: "Gestão de vagas", items: [
+      ["vacancies", "Vagas e candidatos", "kanban"],
+      ["partnerships", "Parcerias e jovens", "building"],
+    ] },
     { label: "Empresas", items: [["companies", "Empresas parceiras", "building"]] },
     { label: "Jovens", items: [
       ["apprentices", "Jovens / Aprendizes", "users"],
@@ -662,6 +666,8 @@ async function renderView() {
       terminations: renderTerminations,
       documents: renderDocuments,
       accounting: renderAccounting,
+      vacancies: renderVacancies,
+      partnerships: renderPartnerships,
       people: renderPeople,
       courses: renderCourses,
       "course-editor": renderCourseEditor,
@@ -1084,6 +1090,26 @@ async function renderCompanies(content) {
 
 function operationalRow(title, detail, status, actions = "") {
   return `<article class="person-row"><span class="avatar">${icon("tasks")}</span><div class="person-main"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail || "Sem informações adicionais")}</small></div><div class="person-access">${status ? `<span class="status status-draft">${escapeHtml(status)}</span>` : ""}</div><div class="person-actions">${actions}</div></article>`;
+}
+
+async function renderVacancies(content) {
+  const [candidates, vacancies, applications, references] = await Promise.all([
+    supabase.from("candidates").select("id,status"), supabase.from("job_vacancies").select("id,title,company_id,quantity,status,due_date").order("created_at", { ascending: false }), supabase.from("vacancy_applications").select("id,vacancy_id,status"), loadOperationalReferences(),
+  ]);
+  if (candidates.error || vacancies.error || applications.error) throw candidates.error || vacancies.error || applications.error;
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  const active = (vacancies.data || []).filter((item) => item.status === "open");
+  content.innerHTML = `${pageHead("Gestão de vagas", "Controle empresas aptas, candidatos, vagas abertas e cada etapa da seleção.")}
+    <section class="metric-grid">${metric("Empresas ativas", references.companies.filter((item) => item.is_active).length, "building")}${metric("Candidatos", (candidates.data || []).length, "users")}${metric("Vagas abertas", active.length, "kanban")}${metric("Em seleção", (applications.data || []).filter((item) => !["rejected", "hired"].includes(item.status)).length, "tasks")}</section>
+    <section class="card"><div class="card-head"><div><span class="eyebrow">Vagas abertas</span><h2>Demandas das empresas</h2></div></div>${active.length ? `<div class="people-list">${active.map((item) => operationalRow(item.title, `${companyMap.get(item.company_id) || "Empresa"} · ${item.quantity} posição(ões)${item.due_date ? ` · prazo ${formatDate(item.due_date)}` : ""}`, "Aberta")).join("")}</div>` : emptyState("Nenhuma vaga aberta", "As próximas vagas cadastradas pelas empresas aparecerão aqui.")}</section>`;
+}
+
+async function renderPartnerships(content) {
+  const [agreements, references] = await Promise.all([supabase.from("partnership_agreements").select("*").order("created_at", { ascending: false }), loadOperationalReferences()]);
+  if (agreements.error) throw agreements.error;
+  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
+  content.innerHTML = `${pageHead("Parcerias e jovens", "Diferencie o contrato de parceria com a empresa do contrato individual de cada jovem.")}
+    <section class="card"><div class="people-list">${(agreements.data || []).length ? agreements.data.map((item) => operationalRow(companyMap.get(item.company_id) || "Empresa", `${item.title} · ${item.start_date ? formatDate(item.start_date) : "início não informado"}${item.end_date ? ` até ${formatDate(item.end_date)}` : ""}`, item.status)).join("") : emptyState("Nenhuma parceria cadastrada", "Os contratos de parceria aparecerão aqui. Os contratos dos jovens seguem no Departamento Pessoal.")}</div></section>`;
 }
 
 async function renderAdmissions(content) {
