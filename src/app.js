@@ -748,40 +748,58 @@ async function countRows(table, filter) {
 }
 
 async function renderAdminOverview(content) {
-  const [companies, apprentices, courses, taskResult, processResult] = await Promise.all([
+  const [companies, apprentices, courses, admissions, contracts, taskResult, processResult, alertResult] = await Promise.all([
     countRows("companies", (query) => query.eq("is_active", true)),
     countRows("profiles", (query) => query.eq("role", "apprentice").eq("is_active", true)),
     countRows("courses"),
+    countRows("admission_cases", (query) => query.not("status", "in", "(completed,cancelled)")),
+    countRows("contracts", (query) => query.in("status", ["scheduled", "active", "closing"])),
     supabase.from("tasks").select("id,title,status,priority,due_at").not("status", "in", "(completed,cancelled)").order("due_at", { ascending: true, nullsFirst: false }).limit(250),
     supabase.from("pipeline_items").select("id,title,pipeline_id,priority,due_at,closed_at").eq("is_archived", false).order("due_at", { ascending: true, nullsFirst: false }).limit(250),
+    supabase.from("operational_alerts").select("id,category,severity,title,message,due_on,metadata").eq("status", "active").order("severity").order("due_on", { ascending: true, nullsFirst: false }).limit(100),
   ]);
-  if (taskResult.error || processResult.error) throw taskResult.error || processResult.error;
+  if (taskResult.error || processResult.error || alertResult.error) throw taskResult.error || processResult.error || alertResult.error;
   const openTasks = taskResult.data || [];
   const openProcesses = (processResult.data || []).filter((item) => !item.closed_at);
-  const attention = [
+  const liveAttention = [
     ...openTasks.filter((task) => isOverdue(task.due_at)).map((task) => ({ ...task, kind: "task" })),
     ...openProcesses.filter((item) => isOverdue(item.due_at)).map((item) => ({ ...item, kind: "process" })),
   ].sort((first, second) => new Date(first.due_at) - new Date(second.due_at));
+  const alertView = {
+    contract: "contracts", admission: "admissions", document: "admissions", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves",
+  };
+  const persistedAlerts = (alertResult.data || []).map((item) => ({ ...item, kind: "alert", target: alertView[item.category] || "overview" }));
+  const attention = [...persistedAlerts, ...liveAttention.filter((item) => !persistedAlerts.some((alert) => alert.category === item.kind))];
+  const urgentCount = persistedAlerts.filter((item) => item.severity === "urgent").length;
 
   content.innerHTML = `
-    ${pageHead("Visão geral", "Acompanhe a operação, identifique atrasos e acesse rapidamente o que precisa de ação.", `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>`)}
+    ${pageHead("Visão geral", "HOJE: veja o que exige providência antes de abrir planilhas ou e-mails.", `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>`)}
     <section class="metric-grid">
       ${metric("Empresas ativas", companies, "building")}
       ${metric("Jovens ativos", apprentices, "users")}
+      ${metric("Admissões em andamento", admissions, "tasks")}
+      ${metric("Contratos acompanhados", contracts, "calendar")}
       ${metric("Processos abertos", openProcesses.length, "kanban")}
       ${metric("Tarefas pendentes", openTasks.length, "tasks")}
     </section>
     <section class="dashboard-grid">
       <article class="card attention-card">
-        <div class="card-head"><div><span class="eyebrow">Precisa da sua atenção</span><h2>${attention.length ? `${attention.length} ${attention.length === 1 ? "item atrasado" : "itens atrasados"}` : "Nenhum atraso identificado"}</h2></div>${attention.length ? `<span class="attention-count">${attention.length}</span>` : ""}</div>
-        ${attention.length ? `<div class="attention-list">${attention.slice(0, 8).map((item) => `<button data-nav="${item.kind === "task" ? "tasks" : "pipelines"}"><span class="attention-icon">${icon(item.kind === "task" ? "tasks" : "kanban")}</span><span><strong>${escapeHtml(item.title)}</strong><small>${item.kind === "task" ? "Tarefa" : "Processo"} · prazo em ${formatDate(item.due_at, true)}</small></span>${priorityBadge(item.priority)}</button>`).join("")}</div>` : `<div class="attention-clear">${icon("check")}<div><strong>Rotina em dia</strong><p>Os processos e tarefas com prazo estão dentro do período previsto.</p></div></div>`}
+        <div class="card-head"><div><span class="eyebrow">Precisa da sua atenção</span><h2>${attention.length ? `${attention.length} ${attention.length === 1 ? "pendência identificada" : "pendências identificadas"}` : "Nenhuma pendência crítica"}</h2></div>${attention.length ? `<span class="attention-count">${urgentCount || attention.length}</span>` : ""}</div>
+        ${attention.length ? `<div class="attention-list">${attention.slice(0, 8).map((item) => {
+          const isAlert = item.kind === "alert";
+          const iconName = isAlert ? (item.category === "contract" ? "calendar" : item.category === "accounting" ? "mail" : item.category === "document" ? "upload" : item.category === "task" ? "tasks" : "alert") : item.kind === "task" ? "tasks" : "kanban";
+          const destination = isAlert ? item.target : item.kind === "task" ? "tasks" : "pipelines";
+          const detail = isAlert ? item.message : `${item.kind === "task" ? "Tarefa" : "Processo"} · prazo em ${formatDate(item.due_at, true)}`;
+          return `<button data-nav="${destination}"><span class="attention-icon">${icon(iconName)}</span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(detail)}</small></span>${isAlert ? `<span class="status status-${item.severity === "urgent" ? "cancelled" : "draft"}">${item.severity === "urgent" ? "Urgente" : "Atenção"}</span>` : priorityBadge(item.priority)}</button>`;
+        }).join("")}</div>` : `<div class="attention-clear">${icon("check")}<div><strong>Rotina em dia</strong><p>Não há contratos, documentos, tarefas ou retornos vencidos no momento.</p></div></div>`}
       </article>
       <article class="card quick-actions-card">
-        <div class="card-head"><div><span class="eyebrow">Acesso rápido</span><h2>Rotina CAFCM</h2></div></div>
+        <div class="card-head"><div><span class="eyebrow">Rotina de hoje</span><h2>Próximas ações</h2></div></div>
+        ${checklistItem(`${persistedAlerts.filter((item) => item.category === "document").length} documentos pendentes`, persistedAlerts.some((item) => item.category === "document"), "admissions")}
+        ${checklistItem(`${persistedAlerts.filter((item) => item.category === "contract").length} contratos em alerta`, persistedAlerts.some((item) => item.category === "contract"), "contracts")}
+        ${checklistItem(`${persistedAlerts.filter((item) => item.category === "accounting").length} retornos da contabilidade`, persistedAlerts.some((item) => item.category === "accounting"), "accounting")}
         ${checklistItem("Abrir a Central de Esteiras", openProcesses.length > 0, "pipelines")}
         ${checklistItem("Conferir tarefas e prazos", openTasks.length > 0, "tasks")}
-        ${checklistItem("Gerenciar jovens", apprentices > 0, "apprentices")}
-        ${checklistItem(`Acompanhar ${courses} ${courses === 1 ? "curso" : "cursos"}`, courses > 0, "courses")}
       </article>
     </section>
   `;
