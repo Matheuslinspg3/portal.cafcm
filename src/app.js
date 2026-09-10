@@ -380,6 +380,8 @@ function showToast(message, type = "success") {
 
 function friendlyError(error) {
   const message = String(error?.message || "");
+  if (message.includes("Email not confirmed")) return "Por favor, confirme seu e-mail através do link enviado antes de entrar.";
+  if (message.includes("Invalid login credentials")) return "E-mail ou senha inválidos.";
   if (error?.code === "23505" && message.includes("companies_cnpj_unique_idx")) return "Já existe uma empresa cadastrada com este CNPJ.";
   if (error?.code === "23514") return "Revise os dados informados: um dos campos está fora do formato permitido.";
   if (message.toLowerCase().includes("failed to fetch")) return "Não foi possível conectar ao serviço. Verifique sua internet e tente novamente.";
@@ -2586,7 +2588,7 @@ app.addEventListener("submit", async (event) => {
   try {
     if (form.id === "login-form") {
       const { error } = await supabase.auth.signInWithPassword({ email: String(values.email).trim(), password: String(values.password) });
-      if (error) throw new Error("E-mail ou senha inválidos.");
+      if (error) throw error;
       return await loadPortal();
     }
 

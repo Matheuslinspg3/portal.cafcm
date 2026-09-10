@@ -928,7 +928,7 @@ async function resendPortalAccess(req: Request, input: Record<string, unknown>) 
   }
 
   const { error: resendError } = await ctx.supabaseAdmin.auth.resend({
-    type: "signup",
+    type: "invite",
     email: user.email,
     options: { emailRedirectTo: siteOrigin(req) },
   });
