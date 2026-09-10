@@ -380,8 +380,6 @@ function showToast(message, type = "success") {
 
 function friendlyError(error) {
   const message = String(error?.message || "");
-  if (message.includes("Email not confirmed")) return "Por favor, confirme seu e-mail através do link enviado antes de entrar.";
-  if (message.includes("Invalid login credentials")) return "E-mail ou senha inválidos.";
   if (error?.code === "23505" && message.includes("companies_cnpj_unique_idx")) return "Já existe uma empresa cadastrada com este CNPJ.";
   if (error?.code === "23514") return "Revise os dados informados: um dos campos está fora do formato permitido.";
   if (message.toLowerCase().includes("failed to fetch")) return "Não foi possível conectar ao serviço. Verifique sua internet e tente novamente.";
@@ -432,17 +430,22 @@ async function renderLogin(mode = "login") {
   state.view = null;
   const loginMode = mode === "login";
   const recoverMode = mode === "recover";
+  const resendMode = mode === "resend";
   const bootstrapMode = mode === "bootstrap";
   const heading = bootstrapMode
     ? "Configure o primeiro acesso."
     : recoverMode
       ? "Recupere sua senha."
-      : "Entre no Portal CAFCM.";
+      : resendMode
+        ? "Reenvie a confirmação."
+        : "Entre no Portal CAFCM.";
   const intro = bootstrapMode
     ? "Use a chave inicial fornecida nesta implantação. Depois disso, novos acessos serão criados somente por convite."
     : recoverMode
       ? "Informe o e-mail cadastrado para receber o link de recuperação."
-      : "O acesso é enviado pela CAFCM. Jovens, empresas e equipe visualizam somente o que corresponde ao seu perfil.";
+      : resendMode
+        ? "Use esta opção quando o convite já foi aceito, mas o primeiro acesso ainda não concluiu."
+        : "O acesso é enviado pela CAFCM. Jovens, empresas e equipe visualizam somente o que corresponde ao seu perfil.";
 
   app.innerHTML = `
     <main class="auth-shell">
@@ -461,6 +464,7 @@ async function renderLogin(mode = "login") {
             </form>
             <div class="auth-links">
               <button type="button" class="text-link" data-auth-mode="recover">Esqueci minha senha</button>
+              <button type="button" class="text-link" data-auth-mode="resend">Reenviar confirmação</button>
               <button type="button" class="text-link setup-link" data-auth-mode="bootstrap" hidden>Configurar primeiro acesso da CAFCM</button>
             </div>
           ` : ""}
@@ -469,6 +473,14 @@ async function renderLogin(mode = "login") {
             <form id="recover-form" class="stack-form">
               <label>E-mail<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com" /></label>
               <button class="btn btn-primary btn-block" type="submit">Enviar link de recuperação</button>
+            </form>
+            <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
+          ` : ""}
+
+          ${resendMode ? `
+            <form id="resend-form" class="stack-form">
+              <label>E-mail<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com" /></label>
+              <button class="btn btn-primary btn-block" type="submit">Reenviar confirmação</button>
             </form>
             <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
           ` : ""}
@@ -1727,16 +1739,14 @@ async function openDialog(type, recordId = null) {
       </div>
       <label>Tipo de acesso<select name="role" required><option value="apprentice">Jovem aprendiz</option><option value="company">Representante de empresa</option><option value="cafcm_admin">Equipe CAFCM</option></select></label>
       <label class="company-field">Empresa vinculada<select name="companyId"><option value="">Sem empresa vinculada</option>${(companies || []).map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("")}</select><small>Opcional para o jovem e obrigatório para representantes de empresa.</small></label>
-      <label>Senha inicial<select name="passwordMode"><option value="random">Gerar senha segura automaticamente</option><option value="manual">Definir uma senha agora</option></select></label>
-      <label class="manual-password-field" hidden>Senha escolhida<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" /><small>Use pelo menos 10 caracteres.</small></label>
-      <p class="form-note">O convite será enviado ao e-mail informado. A senha inicial aparecerá uma única vez após a criação do acesso.</p>
+      <p class="form-note">O convite será enviado ao e-mail informado. A pessoa confirma o acesso pelo link e cria a própria senha no primeiro acesso.</p>
       <button class="btn btn-primary" type="submit">Criar acesso e enviar convite</button>
     </form>`;
   }
 
   if (type === "people-import") {
     body = `<form id="people-import-form" class="dialog-form">
-      <div class="import-explainer">${icon("upload")}<div><strong>Importe pessoas sem apagar o histórico existente</strong><p>Contas já cadastradas são atualizadas pelo e-mail. Novas pessoas recebem convite e senha temporária. Um backup JSON também restaura matrículas, conclusões e atividades quando os cursos ainda existem.</p></div></div>
+      <div class="import-explainer">${icon("upload")}<div><strong>Importe pessoas sem apagar o histórico existente</strong><p>Contas já cadastradas são atualizadas pelo e-mail. Novas pessoas recebem convite para confirmar o acesso e criar a própria senha. Um backup JSON também restaura matrículas, conclusões e atividades quando os cursos ainda existem.</p></div></div>
       <label>Arquivo CSV ou backup JSON<input name="peopleFile" type="file" accept=".csv,.json,text/csv,application/json" required /><small>Até 100 pessoas por importação. Use o modelo CSV disponível na página.</small></label>
       <label class="confirmation-field"><input name="confirmImport" type="checkbox" value="yes" required /><span>Confirmo o envio de convites por e-mail para pessoas novas do arquivo.</span></label>
       <div class="form-note">Perfis existentes mantêm suas matrículas e conclusões. Senhas não são exportadas em backups.</div>
@@ -1923,6 +1933,16 @@ async function openDialog(type, recordId = null) {
 function renderInviteCredentials(email, password, mode = "invite") {
   const root = document.querySelector("#overlay-root");
   if (!root) return;
+  if (mode === "invite") {
+    root.innerHTML = `<div class="dialog-backdrop"><section class="dialog invite-success" role="dialog" aria-modal="true" aria-labelledby="invite-success-title">
+      <div class="dialog-head"><div><span class="eyebrow">Acesso criado</span><h2 id="invite-success-title">Convite enviado por e-mail</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
+      <div class="success-symbol">${icon("mail")}</div>
+      <p>O convite de <strong>${escapeHtml(email)}</strong> foi enviado. A pessoa deve abrir o link recebido, confirmar o e-mail e criar a própria senha no primeiro acesso.</p>
+      <div class="dialog-instructions">Se o convite expirar ou já tiver sido usado sem concluir o acesso, use a opção “Reenviar confirmação” na tela de entrada.</div>
+      <button class="btn btn-primary btn-block" data-close-dialog>Concluir</button>
+    </section></div>`;
+    return;
+  }
   root.innerHTML = `<div class="dialog-backdrop"><section class="dialog invite-success" role="dialog" aria-modal="true" aria-labelledby="invite-success-title">
     <div class="dialog-head"><div><span class="eyebrow">${mode === "invite" ? "Acesso criado" : "Credencial alterada"}</span><h2 id="invite-success-title">${mode === "invite" ? "Convite enviado por e-mail" : "Nova senha definida"}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
     <div class="success-symbol">${icon("mail")}</div>
@@ -2221,7 +2241,7 @@ app.addEventListener("click", async (event) => {
     return renderView();
   }
   if (target.hasAttribute("data-download-people-template")) {
-    return downloadTextFile("modelo-importacao-pessoas-cafcm.csv", "nome;email;perfil;empresa;senha_opcional\n", "text/csv;charset=utf-8");
+    return downloadTextFile("modelo-importacao-pessoas-cafcm.csv", "nome;email;perfil;empresa\n", "text/csv;charset=utf-8");
   }
   if (target.hasAttribute("data-export-people")) {
     target.disabled = true;
@@ -2588,8 +2608,25 @@ app.addEventListener("submit", async (event) => {
   try {
     if (form.id === "login-form") {
       const { error } = await supabase.auth.signInWithPassword({ email: String(values.email).trim(), password: String(values.password) });
-      if (error) throw error;
+      if (error) {
+        const message = String(error.message || "").toLowerCase();
+        if (message.includes("email not confirmed") || message.includes("not confirmed")) {
+          throw new Error("Este e-mail ainda precisa ser confirmado. Use “Reenviar confirmação” e abra o novo link recebido.");
+        }
+        throw new Error("E-mail ou senha inválidos.");
+      }
       return await loadPortal();
+    }
+
+    if (form.id === "resend-form") {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: String(values.email).trim(),
+        options: { emailRedirectTo: SITE_ORIGIN },
+      });
+      if (error) throw error;
+      form.innerHTML = `<div class="form-success">${icon("mail")}<h2>Verifique seu e-mail</h2><p>Se o endereço estiver pendente de confirmação, enviamos um novo link para concluir o acesso.</p></div>`;
+      return;
     }
 
     if (form.id === "recover-form") {
@@ -2731,7 +2768,6 @@ app.addEventListener("submit", async (event) => {
             email: row.email,
             role: normalizeImportedRole(row.perfil || row.tipo_de_acesso || row.role),
             companyId: companyReference ? companyMap.get(companyReference.toLowerCase()) || companyReference : null,
-            password: row.senha_opcional || row.senha || row.password || "",
           };
         });
       }
@@ -2855,17 +2891,15 @@ app.addEventListener("submit", async (event) => {
 
     if (form.id === "invite-form") {
       if (values.role === "company" && !values.companyId) throw new Error("Selecione a empresa do representante.");
-      const result = await callAdmin({
+      await callAdmin({
         action: "invite",
         fullName: values.fullName,
         email: values.email,
         role: values.role,
         companyId: values.role === "cafcm_admin" ? null : values.companyId || null,
-        password: values.passwordMode === "manual" ? String(values.password || "") : null,
       }, true);
-      if (!result.temporaryPassword) throw new Error("O acesso foi criado, mas a senha inicial não foi retornada. Use a recuperação de senha.");
       await renderView();
-      renderInviteCredentials(String(values.email).trim().toLowerCase(), result.temporaryPassword);
+      renderInviteCredentials(String(values.email).trim().toLowerCase());
       return;
     }
 
@@ -2994,8 +3028,13 @@ app.addEventListener("submit", async (event) => {
 
 async function init() {
   renderBoot();
-  const hashType = new URLSearchParams(location.hash.slice(1)).get("type");
-  const queryType = new URLSearchParams(location.search).get("type");
+  const hashParams = new URLSearchParams(location.hash.slice(1));
+  const queryParams = new URLSearchParams(location.search);
+  const hashType = hashParams.get("type");
+  const queryType = queryParams.get("type");
+  const tokenHash = queryParams.get("token_hash") || hashParams.get("token_hash");
+  const otpType = queryType || hashType;
+  const authError = queryParams.get("error_description") || hashParams.get("error_description");
 
   supabase.auth.onAuthStateChange((event, session) => {
     state.session = session;
@@ -3006,6 +3045,24 @@ async function init() {
 
   const { data } = await supabase.auth.getSession();
   state.session = data.session;
+
+  if (authError) {
+    history.replaceState({}, "", location.pathname);
+    await renderLogin();
+    return showToast(decodeURIComponent(authError), "error");
+  }
+
+  if (tokenHash && otpType) {
+    const { data: verified, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: otpType });
+    if (error) {
+      history.replaceState({}, "", location.pathname);
+      await renderLogin("resend");
+      return showToast("O link não pôde ser confirmado. Reenvie a confirmação e use o novo e-mail recebido.", "error");
+    }
+    state.session = verified.session;
+    history.replaceState({}, "", location.pathname);
+    if (state.session && ["invite", "recovery", "signup", "email"].includes(otpType)) return renderPasswordSetup();
+  }
 
   if (state.session && ["invite", "recovery", "signup"].includes(hashType || queryType)) {
     return renderPasswordSetup();
