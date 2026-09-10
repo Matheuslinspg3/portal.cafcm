@@ -3,6 +3,31 @@ import { createSupabaseContext } from "npm:@supabase/server@1.5.3";
 const DEFAULT_SITE_ORIGIN = "https://portal.cafcm.org.br";
 const BOOTSTRAP_HASH = Deno.env.get("PORTAL_BOOTSTRAP_HASH") ?? "";
 const ROLE_VALUES = new Set(["cafcm_admin", "apprentice", "company"]);
+const DEPARTMENT_VALUES = new Set(["management", "vacancies", "coordination", "personnel", "hr", "finance"]);
+
+function hasDepartmentPermission(department: string, permission: string) {
+  if (department === "management") return true;
+  if (["directory.read", "operations.read", "operations.manage", "companies.read"].includes(permission)) {
+    return DEPARTMENT_VALUES.has(department);
+  }
+  if (permission === "companies.manage") return ["vacancies", "hr"].includes(department);
+  if (["vacancies.read", "vacancies.manage"].includes(permission)) return ["vacancies", "hr"].includes(department);
+  if (["academic.read", "academic.manage"].includes(permission)) return department === "coordination";
+  if (permission === "apprentice.history.read") return ["coordination", "personnel", "hr"].includes(department);
+  if (["personnel.read", "personnel.manage"].includes(permission)) return department === "personnel";
+  if (permission === "contracts.read") return ["personnel", "finance"].includes(department);
+  if (permission === "contracts.manage") return department === "personnel";
+  if (["documents.read", "documents.manage"].includes(permission)) return ["personnel", "finance"].includes(department);
+  if (["finance.read", "finance.manage"].includes(permission)) return ["personnel", "finance"].includes(department);
+  if (["people.read", "people.manage", "audit.read"].includes(permission)) return department === "hr";
+  return false;
+}
+
+function normalizeDepartment(value: unknown, role: string) {
+  if (role !== "cafcm_admin") return null;
+  const department = cleanText(value, 32) || "management";
+  return DEPARTMENT_VALUES.has(department) ? department : null;
+}
 
 function normalizeOrigin(value: string) {
   try {
@@ -137,22 +162,26 @@ async function writeAudit(
   if (error) console.error("portal-admin audit error", { action, code: error.code });
 }
 
-async function requireCafcmAdmin(req: Request) {
+async function requireCafcmAdmin(req: Request, permission = "people.manage") {
   const { data: ctx, error } = await createSupabaseContext(req, { auth: "user" });
   if (error || !ctx) return { response: json(req, { error: "Sua sessão expirou. Entre novamente." }, 401) };
 
   const requesterId = String(ctx.userClaims?.id ?? ctx.jwtClaims?.sub ?? "");
   const { data: requester, error: requesterError } = await ctx.supabaseAdmin
     .from("profiles")
-    .select("role")
+    .select("role,department,is_active")
     .eq("id", requesterId)
     .single();
 
-  if (requesterError || requester?.role !== "cafcm_admin") {
-    return { response: json(req, { error: "Somente a equipe CAFCM pode gerenciar pessoas e convites." }, 403) };
+  const requesterDepartment = String(requester?.department || "management");
+  if (requesterError || requester?.role !== "cafcm_admin" || !requester?.is_active) {
+    return { response: json(req, { error: "Este acesso da equipe CAFCM não está ativo." }, 403) };
+  }
+  if (!hasDepartmentPermission(requesterDepartment, permission)) {
+    return { response: json(req, { error: "Seu departamento não possui permissão para realizar esta ação." }, 403) };
   }
 
-  return { ctx, requesterId };
+  return { ctx, requesterId, requesterDepartment };
 }
 
 async function listAllAuthUsers(admin: any) {
@@ -302,6 +331,7 @@ async function bootstrapAdmin(req: Request, input: Record<string, unknown>) {
     full_name: fullName,
     role: "cafcm_admin",
     company_id: null,
+    department: "management",
     created_by: null,
     created_at: new Date().toISOString(),
   }, { onConflict: "email" });
@@ -321,7 +351,7 @@ async function bootstrapAdmin(req: Request, input: Record<string, unknown>) {
     password,
     email_confirm: true,
     user_metadata: { full_name: fullName },
-    app_metadata: { portal_role: "cafcm_admin" },
+    app_metadata: { portal_role: "cafcm_admin", portal_department: "management" },
   });
 
   if (createError || !created.user) {
@@ -345,6 +375,7 @@ async function bootstrapAdmin(req: Request, input: Record<string, unknown>) {
     full_name: fullName,
     role: "cafcm_admin",
     company_id: null,
+    department: "management",
   });
   const { error: contactError } = await admin.from("profile_contacts").upsert({ id: userId, email });
 
@@ -380,13 +411,14 @@ async function provisionInvitedUser(
   req: Request,
   admin: any,
   requesterId: string,
-  person: { email: string; fullName: string; role: string; companyId: string | null },
+  person: { email: string; fullName: string; role: string; companyId: string | null; department: string | null },
 ) {
   const { error: pendingError } = await admin.from("pending_invites").upsert({
     email: person.email,
     full_name: person.fullName,
     role: person.role,
     company_id: person.companyId,
+    department: person.department,
     created_by: requesterId,
     created_at: new Date().toISOString(),
   }, { onConflict: "email" });
@@ -405,6 +437,7 @@ async function provisionInvitedUser(
 
   const appMetadata: Record<string, unknown> = { portal_role: person.role };
   if (person.companyId) appMetadata.company_id = person.companyId;
+  if (person.department) appMetadata.portal_department = person.department;
 
   const { error: updateError } = await admin.auth.admin.updateUserById(invited.user.id, {
     user_metadata: { full_name: person.fullName },
@@ -422,6 +455,7 @@ async function provisionInvitedUser(
     full_name: person.fullName,
     role: person.role,
     company_id: person.companyId,
+    department: person.department,
     is_active: true,
     archived_at: null,
     archived_by: null,
@@ -441,16 +475,20 @@ async function provisionInvitedUser(
 async function inviteUser(req: Request, input: Record<string, unknown>) {
   const access = await requireCafcmAdmin(req);
   if ("response" in access) return access.response;
-  const { ctx, requesterId } = access;
+  const { ctx, requesterId, requesterDepartment } = access;
 
   const email = cleanText(input.email, 254).toLowerCase();
   const fullName = cleanText(input.fullName, 160);
   const role = cleanText(input.role, 32);
   const suppliedCompanyId = cleanText(input.companyId, 36) || null;
   const companyId = role === "cafcm_admin" ? null : suppliedCompanyId;
+  const department = normalizeDepartment(input.department, role);
 
-  if (!validEmail(email) || fullName.length < 2 || !ROLE_VALUES.has(role)) {
+  if (!validEmail(email) || fullName.length < 2 || !ROLE_VALUES.has(role) || (role === "cafcm_admin" && !department)) {
     return json(req, { error: "Revise o nome, o e-mail e o tipo de acesso." }, 400);
+  }
+  if (role === "cafcm_admin" && requesterDepartment !== "management") {
+    return json(req, { error: "Somente a Direção e Administração pode criar acessos para a equipe CAFCM." }, 403);
   }
 
   const companyError = await validateCompanyLink(ctx.supabaseAdmin, role, companyId);
@@ -470,11 +508,13 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
       fullName,
       role,
       companyId,
+      department,
     });
     await writeAudit(ctx.supabaseAdmin, requesterId, "user.invited", "profile", result.user.id, {
       email,
       role,
       company_id: companyId,
+      department,
     }, result.user.id);
     return json(req, { ok: true, userId: result.user.id });
   } catch (error) {
@@ -482,14 +522,16 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
   }
 }
 
-async function listPortalUsers(req: Request) {
-  const access = await requireCafcmAdmin(req);
+async function listPortalUsers(req: Request, input: Record<string, unknown>) {
+  const scope = cleanText(input.scope, 32);
+  const apprenticeDirectory = scope === "apprentices";
+  const access = await requireCafcmAdmin(req, apprenticeDirectory ? "directory.read" : "people.read");
   if ("response" in access) return access.response;
   const { ctx } = access;
 
   const [authUsers, profileResult, contactResult] = await Promise.all([
     listAllAuthUsers(ctx.supabaseAdmin),
-    ctx.supabaseAdmin.from("profiles").select("id,full_name,role,company_id,is_active,archived_at,archived_by,created_at"),
+    ctx.supabaseAdmin.from("profiles").select("id,full_name,role,company_id,department,is_active,archived_at,archived_by,created_at"),
     ctx.supabaseAdmin.from("profile_contacts").select("id,email"),
   ]);
 
@@ -514,6 +556,7 @@ async function listPortalUsers(req: Request) {
         email: contactMap.get(profile.id) || authUser?.email || "",
         role,
         companyId: profile?.company_id ?? authUser?.app_metadata?.company_id ?? null,
+        department: role === "cafcm_admin" ? profile?.department ?? authUser?.app_metadata?.portal_department ?? "management" : null,
         createdAt: authUser?.created_at ?? profile?.created_at ?? null,
         emailConfirmedAt: authUser?.email_confirmed_at ?? authUser?.confirmed_at ?? null,
         lastSignInAt: authUser?.last_sign_in_at ?? null,
@@ -523,7 +566,7 @@ async function listPortalUsers(req: Request) {
         archivedAt: profile.archived_at ?? null,
       };
     })
-    .filter(Boolean)
+    .filter((user: any) => Boolean(user) && (!apprenticeDirectory || user?.role === "apprentice"))
     .sort((a: any, b: any) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
 
   return json(req, { users });
@@ -532,7 +575,7 @@ async function listPortalUsers(req: Request) {
 async function updatePortalUser(req: Request, input: Record<string, unknown>) {
   const access = await requireCafcmAdmin(req);
   if ("response" in access) return access.response;
-  const { ctx, requesterId } = access;
+  const { ctx, requesterId, requesterDepartment } = access;
 
   const userId = cleanText(input.userId, 36);
   const fullName = cleanText(input.fullName, 160);
@@ -540,11 +583,12 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
   const role = cleanText(input.role, 32);
   const suppliedCompanyId = cleanText(input.companyId, 36) || null;
   const companyId = role === "cafcm_admin" ? null : suppliedCompanyId;
+  const department = normalizeDepartment(input.department, role);
   const passwordMode = cleanText(input.passwordMode, 16) || "keep";
   const requestedPassword = String(input.password ?? "");
   const temporaryPassword = passwordMode === "random" ? generateTemporaryPassword() : passwordMode === "manual" ? requestedPassword : null;
 
-  if (!/^[0-9a-f-]{36}$/i.test(userId) || fullName.length < 2 || !validEmail(email) || !ROLE_VALUES.has(role)) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId) || fullName.length < 2 || !validEmail(email) || !ROLE_VALUES.has(role) || (role === "cafcm_admin" && !department)) {
     return json(req, { error: "Revise o nome, o e-mail e o tipo de acesso." }, 400);
   }
 
@@ -563,13 +607,17 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
   if (targetError || !target) return json(req, { error: "A pessoa selecionada não foi encontrada." }, 404);
 
   const currentRole = String(target.app_metadata?.portal_role ?? "");
-  if (userId === requesterId && role !== currentRole) {
-    return json(req, { error: "Você não pode alterar o tipo do seu próprio acesso." }, 400);
+  const currentDepartment = currentRole === "cafcm_admin" ? String(target.app_metadata?.portal_department ?? "management") : null;
+  if (userId === requesterId && (role !== currentRole || department !== currentDepartment)) {
+    return json(req, { error: "Você não pode alterar o tipo ou o departamento do próprio acesso." }, 400);
+  }
+  if ((currentRole === "cafcm_admin" || role === "cafcm_admin") && requesterDepartment !== "management") {
+    return json(req, { error: "Somente a Direção e Administração pode alterar acessos da equipe CAFCM." }, 403);
   }
 
-  if (currentRole === "cafcm_admin" && role !== "cafcm_admin") {
-    const { count } = await ctx.supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }).eq("role", "cafcm_admin").eq("is_active", true);
-    if ((count ?? 0) <= 1) return json(req, { error: "Mantenha pelo menos um acesso da equipe CAFCM." }, 400);
+  if (currentRole === "cafcm_admin" && currentDepartment === "management" && (role !== "cafcm_admin" || department !== "management")) {
+    const { count } = await ctx.supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }).eq("role", "cafcm_admin").eq("department", "management").eq("is_active", true);
+    if ((count ?? 0) <= 1) return json(req, { error: "Mantenha pelo menos um acesso ativo em Direção e Administração." }, 400);
   }
 
   if (String(target.email ?? "").toLowerCase() !== email) {
@@ -582,6 +630,8 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
   const appMetadata: Record<string, unknown> = { ...(target.app_metadata ?? {}), portal_role: role };
   if (companyId) appMetadata.company_id = companyId;
   else delete appMetadata.company_id;
+  if (department) appMetadata.portal_department = department;
+  else delete appMetadata.portal_department;
 
   const attributes: Record<string, unknown> = {
     user_metadata: { ...(target.user_metadata ?? {}), full_name: fullName },
@@ -602,15 +652,22 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
     full_name: fullName,
     role,
     company_id: companyId,
+    department,
   });
   const { error: contactError } = await ctx.supabaseAdmin.from("profile_contacts").upsert({ id: userId, email });
   if (profileError || contactError) return json(req, { error: "O acesso foi alterado, mas o perfil não pôde ser sincronizado." }, 500);
+
+  const permissionsChanged = role !== currentRole || companyId !== (target.app_metadata?.company_id ?? null) || department !== currentDepartment;
+  if (permissionsChanged) {
+    await ctx.supabaseAdmin.from("profiles").update({ onboarding_completed: false }).eq("id", userId);
+  }
 
   const changedFields = [
     ...(fullName !== String(target.user_metadata?.full_name ?? "") ? ["full_name"] : []),
     ...(emailChanged ? ["email"] : []),
     ...(role !== currentRole ? ["role"] : []),
     ...(companyId !== (target.app_metadata?.company_id ?? null) ? ["company_id"] : []),
+    ...(department !== currentDepartment ? ["department"] : []),
     ...(temporaryPassword ? ["password"] : []),
   ];
   await writeAudit(ctx.supabaseAdmin, requesterId, "user.updated", "profile", userId, {
@@ -622,7 +679,7 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
     ok: true,
     emailChanged,
     needsInviteResend: emailChanged && !(target.email_confirmed_at ?? target.confirmed_at),
-    permissionsChanged: role !== currentRole || companyId !== (target.app_metadata?.company_id ?? null),
+    permissionsChanged,
     temporaryPassword,
   });
 }
@@ -630,7 +687,7 @@ async function updatePortalUser(req: Request, input: Record<string, unknown>) {
 async function setPortalUserStatus(req: Request, input: Record<string, unknown>) {
   const access = await requireCafcmAdmin(req);
   if ("response" in access) return access.response;
-  const { ctx, requesterId } = access;
+  const { ctx, requesterId, requesterDepartment } = access;
   const userId = cleanText(input.userId, 36);
   const active = input.active === true;
   if (!/^[0-9a-f-]{36}$/i.test(userId)) return json(req, { error: "A pessoa selecionada é inválida." }, 400);
@@ -638,18 +695,23 @@ async function setPortalUserStatus(req: Request, input: Record<string, unknown>)
 
   const { data: profile, error: profileError } = await ctx.supabaseAdmin
     .from("profiles")
-    .select("id,full_name,role,is_active")
+    .select("id,full_name,role,department,is_active")
     .eq("id", userId)
     .maybeSingle();
   if (profileError || !profile) return json(req, { error: "A pessoa selecionada não foi encontrada." }, 404);
 
-  if (!active && profile.role === "cafcm_admin") {
+  if (profile.role === "cafcm_admin" && requesterDepartment !== "management") {
+    return json(req, { error: "Somente a Direção e Administração pode alterar acessos da equipe CAFCM." }, 403);
+  }
+
+  if (!active && profile.role === "cafcm_admin" && profile.department === "management") {
     const { count } = await ctx.supabaseAdmin
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .eq("role", "cafcm_admin")
+      .eq("department", "management")
       .eq("is_active", true);
-    if ((count ?? 0) <= 1) return json(req, { error: "Mantenha pelo menos um acesso ativo da equipe CAFCM." }, 400);
+    if ((count ?? 0) <= 1) return json(req, { error: "Mantenha pelo menos um acesso ativo em Direção e Administração." }, 400);
   }
 
   const { data: targetResult, error: targetError } = await ctx.supabaseAdmin.auth.admin.getUserById(userId);
@@ -687,7 +749,7 @@ async function setPortalUserStatus(req: Request, input: Record<string, unknown>)
 }
 
 async function getPersonHistory(req: Request, input: Record<string, unknown>) {
-  const access = await requireCafcmAdmin(req);
+  const access = await requireCafcmAdmin(req, "apprentice.history.read");
   if ("response" in access) return access.response;
   const { ctx } = access;
   const userId = cleanText(input.userId, 36);
@@ -734,9 +796,14 @@ function validUuid(value: unknown) {
 async function importPortalPeople(req: Request, input: Record<string, unknown>) {
   const access = await requireCafcmAdmin(req);
   if ("response" in access) return access.response;
-  const { ctx, requesterId } = access;
+  const { ctx, requesterId, requesterDepartment } = access;
   const rawPeople = Array.isArray(input.people) ? input.people.slice(0, 100) : [];
   if (!rawPeople.length) return json(req, { error: "O arquivo não contém pessoas para importar." }, 400);
+  const historyInput = input.history && typeof input.history === "object" ? input.history as Record<string, unknown> : {};
+  const hasHistory = Object.values(historyInput).some((value) => Array.isArray(value) && value.length > 0);
+  if (hasHistory && requesterDepartment !== "management") {
+    return json(req, { error: "A restauração completa do histórico é reservada à Direção e Administração." }, 403);
+  }
 
   const [authUsers, companiesResult] = await Promise.all([
     listAllAuthUsers(ctx.supabaseAdmin),
@@ -754,11 +821,16 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
     const fullName = cleanText(raw?.fullName ?? raw?.full_name, 160);
     let role = cleanText(raw?.role, 32);
     const companyId = role === "cafcm_admin" ? null : cleanText(raw?.companyId ?? raw?.company_id, 36) || null;
+    let department = normalizeDepartment(raw?.department, role);
     const password = String(raw?.password ?? "");
     const sourceId = cleanText(raw?.sourceId ?? raw?.id, 64);
 
-    if (!validEmail(email) || fullName.length < 2 || !ROLE_VALUES.has(role)) {
+    if (!validEmail(email) || fullName.length < 2 || !ROLE_VALUES.has(role) || (role === "cafcm_admin" && !department)) {
       results.push({ email, ok: false, message: "Nome, e-mail ou perfil inválido." });
+      continue;
+    }
+    if (role === "cafcm_admin" && requesterDepartment !== "management") {
+      results.push({ email, ok: false, message: "Somente a Direção e Administração pode importar acessos da equipe CAFCM." });
       continue;
     }
     if (role === "company" && !companyId) {
@@ -782,10 +854,20 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
 
       if (existing) {
         userId = existing.id;
-        if (userId === requesterId) role = String(existing.app_metadata?.portal_role ?? "cafcm_admin");
+        if (userId === requesterId) {
+          role = String(existing.app_metadata?.portal_role ?? "cafcm_admin");
+          department = normalizeDepartment(existing.app_metadata?.portal_department, role);
+        }
+        const currentRole = String(existing.app_metadata?.portal_role ?? "");
+        if ((currentRole === "cafcm_admin" || role === "cafcm_admin") && requesterDepartment !== "management") {
+          results.push({ email, ok: false, message: "Somente a Direção e Administração pode alterar acessos da equipe CAFCM." });
+          continue;
+        }
         const appMetadata: Record<string, unknown> = { ...(existing.app_metadata ?? {}), portal_role: role };
         if (companyId) appMetadata.company_id = companyId;
         else delete appMetadata.company_id;
+        if (department) appMetadata.portal_department = department;
+        else delete appMetadata.portal_department;
         const attributes: Record<string, unknown> = {
           app_metadata: appMetadata,
           user_metadata: { ...(existing.user_metadata ?? {}), full_name: fullName },
@@ -798,6 +880,7 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
           full_name: fullName,
           role,
           company_id: companyId,
+          department,
         });
         const { error: contactError } = await ctx.supabaseAdmin.from("profile_contacts").upsert({ id: userId, email });
         if (profileError || contactError) throw new Error("Não foi possível atualizar o perfil.");
@@ -807,6 +890,7 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
           fullName,
           role,
           companyId,
+          department,
         });
         userId = created.user.id;
         resultType = "invited";
@@ -819,6 +903,7 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
         email,
         role,
         company_id: companyId,
+        department,
       }, userId);
       results.push({ email, ok: true, type: resultType, userId, temporaryPassword });
     } catch (error) {
@@ -839,7 +924,7 @@ async function importPortalPeople(req: Request, input: Record<string, unknown>) 
     }
   }
 
-  const history = input.history && typeof input.history === "object" ? input.history as Record<string, unknown> : {};
+  const history = historyInput;
   let historyRestored = 0;
   let historyFailed = 0;
   const targetFor = (row: any) => idByEmail.get(cleanText(row?.email, 254).toLowerCase()) || idBySource.get(cleanText(row?.sourceId ?? row?.apprenticeId, 64));
@@ -901,13 +986,16 @@ async function logPortalEvent(req: Request, input: Record<string, unknown>) {
 async function resendPortalAccess(req: Request, input: Record<string, unknown>) {
   const access = await requireCafcmAdmin(req);
   if ("response" in access) return access.response;
-  const { ctx, requesterId } = access;
+  const { ctx, requesterId, requesterDepartment } = access;
   const userId = cleanText(input.userId, 36);
   if (!/^[0-9a-f-]{36}$/i.test(userId)) return json(req, { error: "A pessoa selecionada é inválida." }, 400);
 
   const { data, error } = await ctx.supabaseAdmin.auth.admin.getUserById(userId);
   const user = data?.user;
   if (error || !user?.email) return json(req, { error: "A pessoa selecionada não foi encontrada." }, 404);
+  if (user.app_metadata?.portal_role === "cafcm_admin" && requesterDepartment !== "management") {
+    return json(req, { error: "Somente a Direção e Administração pode alterar credenciais da equipe CAFCM." }, 403);
+  }
 
   const confirmed = Boolean(user.email_confirmed_at ?? user.confirmed_at);
   if (confirmed) {
@@ -938,7 +1026,7 @@ export default {
       if (action === "status") return await setupStatus(req);
       if (action === "bootstrap") return await bootstrapAdmin(req, input);
       if (action === "invite") return await inviteUser(req, input);
-      if (action === "list_users") return await listPortalUsers(req);
+      if (action === "list_users") return await listPortalUsers(req, input);
       if (action === "update_user") return await updatePortalUser(req, input);
       if (action === "set_user_status") return await setPortalUserStatus(req, input);
       if (action === "person_history") return await getPersonHistory(req, input);

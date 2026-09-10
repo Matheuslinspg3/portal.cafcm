@@ -12,6 +12,21 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Acadêmico:** cursos, aulas, linhas de aprendizagem, atividades, matrículas e progresso.
 - **Gestão:** pessoas, convites, credenciais e auditoria.
 
+## Permissões por departamento
+
+As permissões da equipe CAFCM são aplicadas tanto na interface quanto no banco de dados. A Direção e Administração mantém acesso integral e é o único departamento autorizado a criar ou alterar contas internas da CAFCM.
+
+| Departamento | Áreas principais | Nível de acesso |
+| --- | --- | --- |
+| Direção e Administração | Todas as áreas | Consulta e alteração |
+| Gestão de Vagas | Empresas, vagas, candidatos e parcerias | Consulta e alteração |
+| Coordenação | Jovens, cursos, aulas, atividades e matrículas | Consulta e alteração |
+| Departamento Pessoal | Admissões, contratos, férias, afastamentos, desligamentos, documentos e contabilidade | Consulta e alteração |
+| Recursos Humanos | Empresas, vagas, pessoas, convites e auditoria | Consulta e alteração; contas internas somente pela Direção |
+| Financeiro | Empresas, contratos, documentos e contabilidade | Consulta de empresas e contratos; alteração de documentos e controles financeiros |
+
+Todos os departamentos da equipe podem usar a Central de Esteiras, Tarefas e Notificações. Jovens e representantes de empresas continuam com os acessos externos já existentes.
+
 ## O que está neste repositório
 
 - `src/app.js`: código-fonte da interface.
@@ -90,6 +105,12 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 8. `supabase/people_audit_learning_paths.sql`
 9. `supabase/migrations/20260909230300_phase_one_operations.sql`
 10. `supabase/migrations/20260909232153_phase_one_foreign_key_indexes.sql`
+11. `supabase/migrations/20260910042123_administrative_core.sql`
+12. `supabase/migrations/20260910044617_operational_alerts.sql`
+13. `supabase/migrations/20260910053000_standard_operational_workflows.sql`
+14. `supabase/migrations/20260910150000_vacancy_management.sql`
+15. `supabase/migrations/20260910154922_department_permissions.sql`
+16. `supabase/migrations/20260910162500_administrative_foreign_key_indexes.sql`
 
 Revise os scripts antes de aplicá-los a uma base que já possui dados. A base CAFCM atual já recebeu essas evoluções; não execute novamente sem conferir o histórico de migrações.
 
@@ -97,6 +118,7 @@ Revise os scripts antes de aplicá-los a uma base que já possui dados. A base C
 
 - As tabelas expostas usam Row Level Security (RLS).
 - A função administrativa confirma a sessão e o perfil `cafcm_admin` antes de operações privilegiadas.
+- A equipe CAFCM recebe permissões por departamento no `app_metadata`, espelhadas no perfil e protegidas por políticas restritivas.
 - Contas de empresa ficam vinculadas à empresa correspondente.
 - Ações relevantes são registradas na auditoria.
 - Arquivos `.env` e dados locais da Vercel são ignorados pelo Git.

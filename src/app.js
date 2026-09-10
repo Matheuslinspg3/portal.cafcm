@@ -48,6 +48,73 @@ const roleLabels = {
   company: "Representante da empresa",
 };
 
+const departmentLabels = {
+  management: "Direção e Administração",
+  vacancies: "Gestão de Vagas",
+  coordination: "Coordenação",
+  personnel: "Departamento Pessoal",
+  hr: "Recursos Humanos",
+  finance: "Financeiro",
+};
+
+const departmentPermissions = {
+  management: ["*"],
+  vacancies: ["directory.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage"],
+  coordination: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "academic.read", "academic.manage"],
+  personnel: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "personnel.read", "personnel.manage", "contracts.read", "contracts.manage", "documents.read", "documents.manage", "finance.read", "finance.manage"],
+  hr: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "people.read", "people.manage", "audit.read"],
+  finance: ["directory.read", "operations.read", "operations.manage", "companies.read", "contracts.read", "documents.read", "documents.manage", "finance.read", "finance.manage"],
+};
+
+const viewPermissions = {
+  overview: "operations.read",
+  pipelines: "operations.read",
+  tasks: "operations.read",
+  notifications: "operations.read",
+  vacancies: "vacancies.read",
+  partnerships: "vacancies.read",
+  companies: "companies.read",
+  apprentices: "directory.read",
+  admissions: "personnel.read",
+  contracts: "contracts.read",
+  leaves: "personnel.read",
+  terminations: "personnel.read",
+  courses: "academic.read",
+  "course-editor": "academic.read",
+  "lesson-editor": "academic.read",
+  enrollments: "academic.read",
+  documents: "documents.read",
+  accounting: "finance.read",
+  people: "people.read",
+  audit: "audit.read",
+};
+
+function profileDepartment(profile = state.profile) {
+  return profile?.role === "cafcm_admin" ? profile.department || "management" : null;
+}
+
+function hasPermission(permission, profile = state.profile) {
+  if (profile?.role !== "cafcm_admin") return false;
+  const permissions = departmentPermissions[profileDepartment(profile)] || [];
+  return permissions.includes("*") || permissions.includes(permission);
+}
+
+function profileAccessLabel(profile = state.profile) {
+  if (profile?.role !== "cafcm_admin") return roleLabels[profile?.role] || "Acesso";
+  return departmentLabels[profileDepartment(profile)] || roleLabels.cafcm_admin;
+}
+
+function departmentOptions(selected = "management") {
+  return Object.entries(departmentLabels)
+    .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+function canManagePerson(person) {
+  if (!hasPermission("people.manage")) return false;
+  return person?.role !== "cafcm_admin" || profileDepartment() === "management";
+}
+
 const blockTypeLabels = {
   text: "Texto e imagem",
   slides: "Apresentação em slides",
@@ -155,8 +222,22 @@ const navigation = {
   ],
 };
 
-function navigationItems(role) {
-  return (navigation[role] || []).flatMap((group) => group.items || []);
+function canAccessView(view, profile = state.profile) {
+  if (!profile) return false;
+  if (profile.role === "apprentice") return ["student-home", "student-courses", "student-activities", "student-course"].includes(view);
+  if (profile.role === "company") return ["company-home", "company-apprentices"].includes(view);
+  const permission = viewPermissions[view];
+  return Boolean(permission && hasPermission(permission, profile));
+}
+
+function navigationForProfile(profile = state.profile) {
+  return (navigation[profile?.role] || [])
+    .map((group) => ({ ...group, items: (group.items || []).filter(([view]) => canAccessView(view, profile)) }))
+    .filter((group) => group.items.length);
+}
+
+function navigationItems(profile = state.profile) {
+  return navigationForProfile(profile).flatMap((group) => group.items || []);
 }
 
 const wizardContent = {
@@ -180,6 +261,47 @@ const wizardContent = {
     ["Defina a próxima ação", "Se notar pouco avanço ou atividades ainda não enviadas, converse com o jovem e alinhe o acompanhamento com a CAFCM. As respostas das atividades permanecem protegidas."],
   ],
 };
+
+const departmentWizardContent = {
+  management: wizardContent.cafcm_admin,
+  vacancies: [
+    ["Comece pelas vagas", "Em Vagas e candidatos, acompanhe as oportunidades abertas, os candidatos vinculados e a etapa atual de cada seleção."],
+    ["Mantenha as empresas atualizadas", "Use Empresas parceiras para conferir os dados da organização antes de abrir uma vaga ou registrar uma parceria."],
+    ["Registre cada avanço", "Inclua o candidato na vaga correspondente e atualize o processo sempre que houver triagem, entrevista, aprovação ou encerramento."],
+    ["Organize sua rotina", "Use Tarefas e Pendências para registrar responsáveis, prazos e providências que ainda precisam ser concluídas."],
+  ],
+  coordination: [
+    ["Acompanhe os jovens", "Consulte Jovens / Aprendizes para localizar os participantes acompanhados pela CAFCM e conferir seus vínculos."],
+    ["Organize a formação", "Em Cursos, estruture aulas, linhas de aprendizagem e atividades antes de publicar o conteúdo."],
+    ["Gerencie as matrículas", "Em Matrículas, vincule cada jovem ao curso correto para liberar o acesso às aulas."],
+    ["Observe o andamento", "Use as conclusões e atividades registradas para orientar o jovem e alinhar o acompanhamento com a empresa."],
+  ],
+  personnel: [
+    ["Comece pelos cadastros", "Confirme a empresa e o jovem antes de iniciar uma admissão ou registrar um contrato."],
+    ["Conduza a admissão", "Abra a admissão, cumpra o checklist e mantenha documentos e prazos no mesmo registro."],
+    ["Acompanhe os contratos", "Registre vigência, função e situação do contrato para visualizar vencimentos e providências futuras."],
+    ["Registre ocorrências", "Use Férias e afastamentos ou Desligamentos para preservar datas, observações e o histórico do jovem."],
+    ["Encaminhe à contabilidade", "Em Contabilidade, registre o que foi enviado, o prazo, o retorno recebido e a conferência final."],
+  ],
+  hr: [
+    ["Organize empresas e candidatos", "Confira as empresas parceiras e use Vagas e candidatos para acompanhar recrutamento, triagem e seleção."],
+    ["Cuide dos acessos externos", "Em Pessoas e convites, crie e atualize acessos de jovens e representantes de empresas."],
+    ["Proteja os acessos da equipe", "Contas e departamentos da equipe CAFCM somente podem ser alterados pela Direção e Administração."],
+    ["Consulte o histórico", "Use a Auditoria para conferir convites, alterações de cadastro e ações relevantes realizadas no portal."],
+  ],
+  finance: [
+    ["Consulte empresas e contratos", "Use Empresas parceiras e Contratos para identificar corretamente a organização e o jovem relacionados a cada registro."],
+    ["Controle os encaminhamentos", "Em Contabilidade, registre assuntos, prazos, envios, retornos e conferências sem depender de controles paralelos."],
+    ["Organize os documentos", "Arquive documentos financeiros no cadastro correspondente para manter um histórico único e pesquisável."],
+    ["Acompanhe os prazos", "Use Tarefas e Pendências para registrar vencimentos, responsáveis e ações que exigem retorno."],
+  ],
+};
+
+function wizardSteps(profile = state.profile) {
+  return profile?.role === "cafcm_admin"
+    ? departmentWizardContent[profileDepartment(profile)] || wizardContent.cafcm_admin
+    : wizardContent[profile?.role] || [];
+}
 
 const icons = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
@@ -333,8 +455,9 @@ function safeHttpUrl(value) {
   }
 }
 
-function defaultView(role) {
-  return role === "cafcm_admin" ? "overview" : role === "company" ? "company-home" : "student-home";
+function defaultView(profile = state.profile) {
+  if (typeof profile === "string") return profile === "cafcm_admin" ? "overview" : profile === "company" ? "company-home" : "student-home";
+  return navigationItems(profile)[0]?.[0] || (profile?.role === "company" ? "company-home" : "student-home");
 }
 
 function viewTitle(view) {
@@ -577,7 +700,7 @@ async function loadPortal() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id,full_name,role,company_id,onboarding_completed,is_active")
+    .select("id,full_name,role,company_id,department,onboarding_completed,is_active")
     .eq("id", state.session.user.id)
     .single();
 
@@ -589,9 +712,9 @@ async function loadPortal() {
   }
 
   state.profile = profile;
-  state.view = state.view && navigationItems(profile.role).some(([id]) => id === state.view)
+  state.view = state.view && canAccessView(state.view, profile)
     ? state.view
-    : defaultView(profile.role);
+    : defaultView(profile);
   state.wizardOpen = !profile.onboarding_completed;
   state.wizardStep = 0;
   if (!state.sessionLogged) {
@@ -604,7 +727,7 @@ async function loadPortal() {
 async function renderPortal() {
   const profile = state.profile;
   if (!profile) return;
-  const nav = navigation[profile.role] || [];
+  const nav = navigationForProfile(profile);
   const [title, subtitle] = viewTitle(state.view);
   const activeBase = ["course-editor", "lesson-editor"].includes(state.view) ? "courses" : state.view === "student-course" ? "student-courses" : state.view;
   if (profile.role === "cafcm_admin") {
@@ -627,7 +750,7 @@ async function renderPortal() {
           ${nav.map((group) => `<section class="nav-group"><span class="nav-label">${escapeHtml(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item ${activeBase === id ? "active" : ""}" data-nav="${id}">${icon(iconName)}<span>${label}</span></button>`).join("")}</section>`).join("")}
         </nav>
         <button class="guide-card" data-open-wizard>${icon("help")}<span><strong>Guia rápido</strong><small>Rever como usar</small></span></button>
-        <div class="sidebar-user"><span class="avatar">${escapeHtml(initials(profile.full_name))}</span><span><strong>${escapeHtml(profile.full_name || roleLabels[profile.role])}</strong><small>${roleLabels[profile.role]}</small></span></div>
+        <div class="sidebar-user"><span class="avatar">${escapeHtml(initials(profile.full_name))}</span><span><strong>${escapeHtml(profile.full_name || roleLabels[profile.role])}</strong><small>${escapeHtml(profileAccessLabel(profile))}</small></span></div>
       </aside>
       <section class="portal-main">
         <header class="topbar">
@@ -653,6 +776,7 @@ async function renderView() {
   const content = document.querySelector("#main-content");
   if (!content) return;
   try {
+    if (!canAccessView(state.view, state.profile)) state.view = defaultView(state.profile);
     const renderers = {
       overview: renderAdminOverview,
       pipelines: renderPipelines,
@@ -681,7 +805,7 @@ async function renderView() {
       "company-home": renderCompanyHome,
       "company-apprentices": renderCompanyApprentices,
     };
-    await (renderers[state.view] || renderers[defaultView(state.profile.role)])(content);
+    await (renderers[state.view] || renderers[defaultView(state.profile)])(content);
   } catch (error) {
     console.error(error);
     content.innerHTML = errorState(error.message);
@@ -774,19 +898,31 @@ async function renderAdminOverview(content) {
   const alertView = {
     contract: "contracts", admission: "admissions", document: "admissions", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves",
   };
-  const persistedAlerts = (alertResult.data || []).map((item) => ({ ...item, kind: "alert", target: alertView[item.category] || "overview" }));
+  const persistedAlerts = (alertResult.data || [])
+    .map((item) => ({ ...item, kind: "alert", target: alertView[item.category] || "overview" }))
+    .filter((item) => canAccessView(item.target));
   const attention = [...persistedAlerts, ...liveAttention.filter((item) => !persistedAlerts.some((alert) => alert.category === item.kind))];
   const urgentCount = persistedAlerts.filter((item) => item.severity === "urgent").length;
+  const metrics = [
+    ["Empresas ativas", companies, "building", canAccessView("companies")],
+    ["Jovens ativos", apprentices, "users", canAccessView("apprentices")],
+    ["Admissões em andamento", admissions, "tasks", canAccessView("admissions")],
+    ["Contratos acompanhados", contracts, "calendar", canAccessView("contracts")],
+    ["Processos abertos", openProcesses.length, "kanban", canAccessView("pipelines")],
+    ["Tarefas pendentes", openTasks.length, "tasks", canAccessView("tasks")],
+  ].filter((item) => item[3]);
+  const quickActions = [
+    [`${persistedAlerts.filter((item) => item.category === "document").length} documentos pendentes`, persistedAlerts.some((item) => item.category === "document"), "admissions"],
+    [`${persistedAlerts.filter((item) => item.category === "contract").length} contratos em alerta`, persistedAlerts.some((item) => item.category === "contract"), "contracts"],
+    [`${persistedAlerts.filter((item) => item.category === "accounting").length} retornos da contabilidade`, persistedAlerts.some((item) => item.category === "accounting"), "accounting"],
+    ["Abrir a Central de Esteiras", openProcesses.length > 0, "pipelines"],
+    ["Conferir tarefas e prazos", openTasks.length > 0, "tasks"],
+  ].filter((item) => canAccessView(item[2]));
 
   content.innerHTML = `
-    ${pageHead("Visão geral", "HOJE: veja o que exige providência antes de abrir planilhas ou e-mails.", `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>`)}
+    ${pageHead("Visão geral", "Veja o que exige providência no trabalho do seu departamento.", hasPermission("operations.manage") ? `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>` : "")}
     <section class="metric-grid">
-      ${metric("Empresas ativas", companies, "building")}
-      ${metric("Jovens ativos", apprentices, "users")}
-      ${metric("Admissões em andamento", admissions, "tasks")}
-      ${metric("Contratos acompanhados", contracts, "calendar")}
-      ${metric("Processos abertos", openProcesses.length, "kanban")}
-      ${metric("Tarefas pendentes", openTasks.length, "tasks")}
+      ${metrics.map(([label, value, iconName]) => metric(label, value, iconName)).join("")}
     </section>
     <section class="dashboard-grid">
       <article class="card attention-card">
@@ -797,15 +933,11 @@ async function renderAdminOverview(content) {
           const destination = isAlert ? item.target : item.kind === "task" ? "tasks" : "pipelines";
           const detail = isAlert ? item.message : `${item.kind === "task" ? "Tarefa" : "Processo"} · prazo em ${formatDate(item.due_at, true)}`;
           return `<button data-nav="${destination}"><span class="attention-icon">${icon(iconName)}</span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(detail)}</small></span>${isAlert ? `<span class="status status-${item.severity === "urgent" ? "cancelled" : "draft"}">${item.severity === "urgent" ? "Urgente" : "Atenção"}</span>` : priorityBadge(item.priority)}</button>`;
-        }).join("")}</div>` : `<div class="attention-clear">${icon("check")}<div><strong>Rotina em dia</strong><p>Não há contratos, documentos, tarefas ou retornos vencidos no momento.</p></div></div>`}
+        }).join("")}</div>` : `<div class="attention-clear">${icon("check")}<div><strong>Rotina em dia</strong><p>Não há tarefas, processos ou alertas disponíveis para o seu departamento.</p></div></div>`}
       </article>
       <article class="card quick-actions-card">
         <div class="card-head"><div><span class="eyebrow">Rotina de hoje</span><h2>Próximas ações</h2></div></div>
-        ${checklistItem(`${persistedAlerts.filter((item) => item.category === "document").length} documentos pendentes`, persistedAlerts.some((item) => item.category === "document"), "admissions")}
-        ${checklistItem(`${persistedAlerts.filter((item) => item.category === "contract").length} contratos em alerta`, persistedAlerts.some((item) => item.category === "contract"), "contracts")}
-        ${checklistItem(`${persistedAlerts.filter((item) => item.category === "accounting").length} retornos da contabilidade`, persistedAlerts.some((item) => item.category === "accounting"), "accounting")}
-        ${checklistItem("Abrir a Central de Esteiras", openProcesses.length > 0, "pipelines")}
-        ${checklistItem("Conferir tarefas e prazos", openTasks.length > 0, "tasks")}
+        ${quickActions.map(([label, done, destination]) => checklistItem(label, done, destination)).join("")}
       </article>
     </section>
   `;
@@ -1016,7 +1148,7 @@ async function renderNotifications(content) {
 
 async function renderApprentices(content) {
   const [peopleResult, references, enrollmentResult, progressResult, attemptResult] = await Promise.all([
-    callAdmin({ action: "list_users" }, true),
+    callAdmin({ action: "list_users", scope: "apprentices" }, true),
     loadOperationalReferences(),
     supabase.from("enrollments").select("apprentice_id,course_id"),
     supabase.from("lesson_progress").select("apprentice_id,lesson_id"),
@@ -1031,9 +1163,11 @@ async function renderApprentices(content) {
   const progressCount = countBy(progressResult.data || [], "apprentice_id");
   const attemptCount = countBy(attemptResult.data || [], "apprentice_id");
   const activeCount = apprentices.filter((person) => person.isActive).length;
+  const canCreateApprentice = hasPermission("people.manage");
+  const canReadHistory = hasPermission("apprentice.history.read") || hasPermission("people.read");
 
   content.innerHTML = `
-    ${pageHead("Jovens / Aprendizes", "Use o cadastro central do jovem em cursos, empresas, processos e tarefas, sem duplicar informações.", `<button class="btn btn-primary" data-dialog="invite">${icon("plus")} Cadastrar jovem</button>`)}
+    ${pageHead("Jovens / Aprendizes", "Use o cadastro central do jovem em cursos, empresas, processos e tarefas, sem duplicar informações.", canCreateApprentice ? `<button class="btn btn-primary" data-dialog="invite">${icon("plus")} Cadastrar jovem</button>` : "")}
     <section class="people-summary"><span><strong>${apprentices.length}</strong> jovens cadastrados</span><span><strong>${activeCount}</strong> ativos</span><span><strong>${apprentices.length - activeCount}</strong> arquivados</span></section>
     <section class="card">
       ${apprentices.length ? `<div class="people-list">${apprentices.map((person) => `<article class="person-row apprentice-row">
@@ -1041,8 +1175,8 @@ async function renderApprentices(content) {
         <div class="person-main"><strong>${escapeHtml(person.fullName || "Nome não informado")}</strong><small>${escapeHtml(person.email || "E-mail não disponível")}</small><small>${escapeHtml(person.companyId ? companyMap.get(person.companyId) || "Empresa vinculada" : "Sem empresa vinculada")}</small></div>
         <div class="person-access"><span class="status ${person.isActive ? "status-published" : "status-archived"}">${person.isActive ? "Ativo" : "Arquivado"}</span></div>
         <div class="apprentice-metrics"><span><strong>${enrollmentCount.get(person.id) || 0}</strong> cursos</span><span><strong>${progressCount.get(person.id) || 0}</strong> aulas concluídas</span><span><strong>${attemptCount.get(person.id) || 0}</strong> atividades</span></div>
-        <div class="person-actions"><button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} Histórico</button>${person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Alterar</button>` : ""}</div>
-      </article>`).join("")}</div>` : emptyState("Nenhum jovem cadastrado", "Cadastre o primeiro jovem para vinculá-lo à empresa, aos cursos e aos processos.", `<button class="btn btn-primary" data-dialog="invite">Cadastrar jovem</button>`)}
+        <div class="person-actions">${canReadHistory ? `<button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} Histórico</button>` : ""}${canManagePerson(person) && person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Alterar</button>` : ""}</div>
+      </article>`).join("")}</div>` : emptyState("Nenhum jovem cadastrado", canCreateApprentice ? "Cadastre o primeiro jovem para vinculá-lo à empresa, aos cursos e aos processos." : "Nenhum jovem está disponível para consulta.", canCreateApprentice ? `<button class="btn btn-primary" data-dialog="invite">Cadastrar jovem</button>` : "")}
     </section>
   `;
 }
@@ -1058,9 +1192,10 @@ async function renderCompanies(content) {
     linkedCount.set(profile.company_id, (linkedCount.get(profile.company_id) || 0) + 1);
   }
 
+  const canManageCompanies = hasPermission("companies.manage");
   content.innerHTML = `
     ${pageHead("Empresas parceiras", "Mantenha identificação, contatos e situação de cada organização acompanhada pela CAFCM.",
-      `<button class="btn btn-primary" data-dialog="company">${icon("plus")} Nova empresa</button>`)}
+      canManageCompanies ? `<button class="btn btn-primary" data-dialog="company">${icon("plus")} Nova empresa</button>` : "")}
     ${data.length ? `<section class="company-grid">
       ${data.map((company) => {
         const address = [company.street, company.street_number, company.district, company.city, company.state].filter(Boolean).join(", ");
@@ -1077,14 +1212,14 @@ async function renderCompanies(content) {
             <div><small>Contato</small><strong>${escapeHtml(company.contact_name || "Não informado")}</strong><span>${escapeHtml([company.contact_role, company.contact_email || company.email || formatPhone(company.contact_phone || company.phone)].filter(Boolean).join(" · "))}</span></div>
             <div><small>Localização</small><strong>${escapeHtml(address || "Endereço não informado")}</strong></div>
           </div>
-          <footer class="company-actions">
+          ${canManageCompanies ? `<footer class="company-actions">
             <button class="btn btn-small btn-secondary" data-edit-company="${company.id}">${icon("edit")} Alterar</button>
             <button class="btn btn-small btn-quiet" data-toggle-company="${company.id}" data-company-active="${company.is_active}">${company.is_active ? "Inativar" : "Reativar"}</button>
             <button class="icon-btn danger-button" data-delete-company="${company.id}" data-company-name="${escapeHtml(company.name)}" aria-label="Excluir ${escapeHtml(company.name)}">${icon("trash")}</button>
-          </footer>
+          </footer>` : ""}
         </article>`;
       }).join("")}
-    </section>` : `<section class="card">${emptyState("Nenhuma empresa cadastrada", "Cadastre a primeira empresa para depois vincular seus representantes e aprendizes.", `<button class="btn btn-primary" data-dialog="company">Cadastrar empresa</button>`)}</section>`}
+    </section>` : `<section class="card">${emptyState("Nenhuma empresa cadastrada", canManageCompanies ? "Cadastre a primeira empresa para depois vincular seus representantes e aprendizes." : "Nenhuma empresa está disponível para consulta.", canManageCompanies ? `<button class="btn btn-primary" data-dialog="company">Cadastrar empresa</button>` : "")}</section>`}
   `;
 }
 
@@ -1143,12 +1278,13 @@ async function renderContracts(content) {
   if (error) throw error;
   const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  content.innerHTML = `${pageHead("Contratos", "Acompanhe vigência e organize os próximos encerramentos.", `<button class="btn btn-primary" data-dialog="contract">${icon("plus")} Novo contrato</button>`)}
+  const canManageContracts = hasPermission("contracts.manage");
+  content.innerHTML = `${pageHead("Contratos", "Acompanhe vigência e organize os próximos encerramentos.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">${icon("plus")} Novo contrato</button>` : "")}
     <section class="card"><div class="people-list">${(contracts || []).length ? contracts.map((item) => {
       const endsSoon = item.status === "active" && item.end_date && new Date(`${item.end_date}T23:59:59`).getTime() - Date.now() <= 30 * 86400000;
       const detail = `${companyMap.get(item.company_id) || "Empresa não informada"} · ${formatDate(item.start_date)} a ${formatDate(item.end_date)}${item.position_title ? ` · ${item.position_title}` : ""}`;
-      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, endsSoon ? "Vence em até 30 dias" : item.status, `<button class="btn btn-small btn-secondary" data-edit-contract="${item.id}">${icon("edit")} Alterar</button>`);
-    }).join("") : emptyState("Nenhum contrato cadastrado", "Registre o contrato para o Portal avisar sobre a vigência e concentrar os documentos.", `<button class="btn btn-primary" data-dialog="contract">Cadastrar contrato</button>`)}</div></section>`;
+      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem não identificado", detail, endsSoon ? "Vence em até 30 dias" : item.status, canManageContracts ? `<button class="btn btn-small btn-secondary" data-edit-contract="${item.id}">${icon("edit")} Alterar</button>` : "");
+    }).join("") : emptyState("Nenhum contrato cadastrado", canManageContracts ? "Registre o contrato para o Portal avisar sobre a vigência e concentrar os documentos." : "Nenhum contrato está disponível para consulta.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">Cadastrar contrato</button>` : "")}</div></section>`;
 }
 
 async function renderLeaves(content) {
@@ -1206,7 +1342,7 @@ async function renderPeople(content) {
     ${pageHead("Pessoas e convites", "Gerencie perfis, credenciais, histórico de aprendizagem e acessos criados pela CAFCM.",
       `<div class="page-actions">
         <button class="btn btn-quiet" data-download-people-template>${icon("download")} Modelo CSV</button>
-        <button class="btn btn-secondary" data-export-people>${icon("download")} Salvar backup</button>
+        ${profileDepartment() === "management" ? `<button class="btn btn-secondary" data-export-people>${icon("download")} Salvar backup</button>` : ""}
         <button class="btn btn-secondary" data-dialog="people-import">${icon("upload")} Importar</button>
         <button class="btn btn-primary" data-dialog="invite">${icon("mail")} Enviar convite</button>
       </div>`)}
@@ -1225,10 +1361,11 @@ async function renderPeople(content) {
           const statusLabel = !person.accessExists ? "Acesso removido" : inactive ? "Arquivado" : pending ? "Convite pendente" : "Ativo";
           const statusClass = inactive ? "status-archived" : pending ? "status-draft" : "status-published";
           const organization = person.role === "cafcm_admin"
-            ? "CAFCM"
+            ? departmentLabels[person.department || "management"] || "Equipe CAFCM"
             : person.companyId
               ? companyMap.get(person.companyId) || "Empresa vinculada"
               : "Sem empresa vinculada";
+          const canManage = canManagePerson(person);
           return `
           <article class="person-row">
             <span class="avatar">${escapeHtml(initials(person.fullName))}</span>
@@ -1237,9 +1374,9 @@ async function renderPeople(content) {
             <div class="person-dates"><small>Criado em ${formatDate(person.createdAt, true)}</small><small>${person.lastSignInAt ? `Último acesso em ${formatDate(person.lastSignInAt, true)}` : "Ainda não acessou"}</small></div>
             <div class="person-actions">
               <button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} Histórico</button>
-              ${person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Perfil e senha</button>` : ""}
-              ${person.accessExists && person.isActive ? `<button class="btn btn-small btn-quiet" data-resend-access="${person.id}" data-access-pending="${pending}">${pending ? "Reenviar convite" : "Enviar recuperação"}</button>` : ""}
-              ${person.id !== state.profile.id && person.accessExists ? `<button class="btn btn-small ${inactive ? "btn-secondary" : "btn-danger-soft"}" data-set-person-active="${person.id}" data-person-active="${inactive ? "true" : "false"}" data-person-name="${escapeHtml(person.fullName)}">${inactive ? "Restaurar acesso" : "Excluir acesso"}</button>` : ""}
+              ${canManage && person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Perfil e senha</button>` : ""}
+              ${canManage && person.accessExists && person.isActive ? `<button class="btn btn-small btn-quiet" data-resend-access="${person.id}" data-access-pending="${pending}">${pending ? "Reenviar convite" : "Enviar recuperação"}</button>` : ""}
+              ${canManage && person.id !== state.profile.id && person.accessExists ? `<button class="btn btn-small ${inactive ? "btn-secondary" : "btn-danger-soft"}" data-set-person-active="${person.id}" data-person-active="${inactive ? "true" : "false"}" data-person-name="${escapeHtml(person.fullName)}">${inactive ? "Restaurar acesso" : "Excluir acesso"}</button>` : ""}
             </div>
           </article>
         `;}).join("")}
@@ -1723,14 +1860,14 @@ function companyRows(data, detailed = false) {
 function renderWizard() {
   const root = document.querySelector("#overlay-root");
   if (!root || !state.profile) return;
-  const steps = wizardContent[state.profile.role] || [];
+  const steps = wizardSteps(state.profile);
   const index = Math.min(state.wizardStep, steps.length - 1);
   const [title, text] = steps[index];
   root.innerHTML = `
     <div class="dialog-backdrop">
       <section class="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
         <button class="dialog-close" data-close-wizard aria-label="Fechar guia">${icon("close")}</button>
-        <div class="wizard-visual"><span>${icon(index === 0 ? "home" : index === steps.length - 1 ? "shield" : "arrow")}</span><small>Guia de uso</small><strong>${roleLabels[state.profile.role]}</strong></div>
+        <div class="wizard-visual"><span>${icon(index === 0 ? "home" : index === steps.length - 1 ? "shield" : "arrow")}</span><small>Guia de uso</small><strong>${escapeHtml(profileAccessLabel(state.profile))}</strong></div>
         <div class="wizard-copy">
           <div class="wizard-progress">${steps.map((_, stepIndex) => `<span class="${stepIndex <= index ? "active" : ""}"></span>`).join("")}</div>
           <p class="eyebrow">Passo ${index + 1} de ${steps.length}</p>
@@ -1759,6 +1896,7 @@ async function openDialog(type, recordId = null) {
         <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus value="${escapeHtml(state.profile.full_name || "")}" /></label>
         <label>E-mail de acesso<input value="${escapeHtml(state.session?.user?.email || "")}" disabled /><small>O e-mail é alterado pela equipe CAFCM em Pessoas e convites.</small></label>
       </div>
+      ${state.profile.role === "cafcm_admin" ? `<label>Departamento<input value="${escapeHtml(profileAccessLabel(state.profile))}" disabled /><small>Somente outro acesso da Direção e Administração pode alterar o seu departamento.</small></label>` : ""}
       <div class="form-section"><span>Segurança</span></div>
       <label>Nova senha<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" placeholder="Deixe em branco para manter a atual" /><small>Use pelo menos 10 caracteres.</small></label>
       <label>Confirmar nova senha<input name="confirmation" type="password" minlength="10" maxlength="128" autocomplete="new-password" /></label>
@@ -1826,14 +1964,17 @@ async function openDialog(type, recordId = null) {
     if (error) throw error;
     const isSelf = person.id === state.profile.id;
     const companyHidden = person.role === "cafcm_admin";
+    const departmentHidden = person.role !== "cafcm_admin";
+    const staffRoleOption = profileDepartment() === "management" ? `<option value="cafcm_admin" ${person.role === "cafcm_admin" ? "selected" : ""}>Equipe CAFCM</option>` : "";
     body = `<form id="person-form" class="dialog-form">
       <input type="hidden" name="userId" value="${person.id}" />
       <div class="form-grid two-columns">
         <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus value="${escapeHtml(person.fullName || "")}" /></label>
         <label>E-mail<input name="email" type="email" maxlength="254" required value="${escapeHtml(person.email || "")}" /></label>
       </div>
-      ${isSelf ? `<input type="hidden" name="role" value="${person.role}" /><label>Tipo de acesso<select disabled><option>${roleLabels[person.role]}</option></select><small>Para sua segurança, você não pode alterar o tipo do próprio acesso.</small></label>` : `<label>Tipo de acesso<select name="role" required><option value="apprentice" ${person.role === "apprentice" ? "selected" : ""}>Jovem aprendiz</option><option value="company" ${person.role === "company" ? "selected" : ""}>Representante de empresa</option><option value="cafcm_admin" ${person.role === "cafcm_admin" ? "selected" : ""}>Equipe CAFCM</option></select></label>`}
+      ${isSelf ? `<input type="hidden" name="role" value="${person.role}" /><label>Tipo de acesso<select disabled><option>${roleLabels[person.role]}</option></select><small>Para sua segurança, você não pode alterar o tipo do próprio acesso.</small></label>` : `<label>Tipo de acesso<select name="role" required><option value="apprentice" ${person.role === "apprentice" ? "selected" : ""}>Jovem aprendiz</option><option value="company" ${person.role === "company" ? "selected" : ""}>Representante de empresa</option>${staffRoleOption}</select></label>`}
       <label class="company-field ${person.role === "company" ? "required-field" : ""}" ${companyHidden ? "hidden" : ""}>Empresa vinculada<select name="companyId" ${person.role === "company" ? "required" : ""} ${companyHidden ? "disabled" : ""}><option value="">Sem empresa vinculada</option>${(companies || []).map((company) => `<option value="${company.id}" ${person.companyId === company.id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " · inativa"}</option>`).join("")}</select><small>Obrigatória para representantes e opcional para jovens.</small></label>
+      <label class="department-field" ${departmentHidden ? "hidden" : ""}>Departamento<select name="department" ${departmentHidden || isSelf ? "disabled" : "required"}>${departmentOptions(person.department || "management")}</select>${isSelf ? `<input type="hidden" name="department" value="${person.department || "management"}" />` : ""}<small>Define os menus e as informações que a pessoa poderá consultar ou alterar.</small></label>
       <div class="form-section"><span>Credenciais</span></div>
       <label>Alterar senha<select name="passwordMode"><option value="keep">Manter a senha atual</option><option value="random">Gerar nova senha temporária</option><option value="manual">Definir uma nova senha</option></select></label>
       <label class="manual-password-field" hidden>Nova senha<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" /><small>Use de 10 a 128 caracteres. A senha nunca aparece no histórico de auditoria.</small></label>
@@ -1859,7 +2000,7 @@ async function openDialog(type, recordId = null) {
         <section><div class="form-section"><span>Atividades</span></div>${history.activityAttempts.length ? `<div class="history-list">${history.activityAttempts.map((item) => `<article>${icon("mail")}<div><strong>${escapeHtml(item.activities?.title || "Atividade")}</strong><small>${escapeHtml(item.activities?.courses?.title || "Curso")} · ${formatDate(item.submitted_at, true)}</small></div>${statusBadge(item.status)}</article>`).join("")}</div>` : `<p class="muted-note">Nenhuma atividade enviada até agora.</p>`}</section>
       </div>
       <section><div class="form-section"><span>Auditoria recente</span></div>${history.audit.length ? `<div class="mini-audit-list">${history.audit.slice(0, 20).map((item) => `<article><div><strong>${escapeHtml(auditActionLabels[item.action] || item.action)}</strong><small>${formatDate(item.occurred_at, true)}</small></div></article>`).join("")}</div>` : `<p class="muted-note">Nenhuma ação registrada para esta pessoa.</p>`}</section>
-      <button class="btn btn-secondary btn-block" data-view-person-audit="${person.id}">Abrir auditoria completa</button>
+      ${canAccessView("audit") ? `<button class="btn btn-secondary btn-block" data-view-person-audit="${person.id}">Abrir auditoria completa</button>` : ""}
     </div>`;
   }
 
@@ -1885,22 +2026,25 @@ async function openDialog(type, recordId = null) {
 
   if (type === "invite") {
     const { data: companies } = await supabase.from("companies").select("id,name").eq("is_active", true).order("name");
+    const staffRoleOption = profileDepartment() === "management" ? `<option value="cafcm_admin">Equipe CAFCM</option>` : "";
     body = `<form id="invite-form" class="dialog-form">
       <div class="form-grid two-columns">
         <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus /></label>
         <label>E-mail<input name="email" type="email" maxlength="254" required /></label>
       </div>
-      <label>Tipo de acesso<select name="role" required><option value="apprentice">Jovem aprendiz</option><option value="company">Representante de empresa</option><option value="cafcm_admin">Equipe CAFCM</option></select></label>
+      <label>Tipo de acesso<select name="role" required><option value="apprentice">Jovem aprendiz</option><option value="company">Representante de empresa</option>${staffRoleOption}</select></label>
       <label class="company-field">Empresa vinculada<select name="companyId"><option value="">Sem empresa vinculada</option>${(companies || []).map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("")}</select><small>Opcional para o jovem e obrigatório para representantes de empresa.</small></label>
+      <label class="department-field" hidden>Departamento<select name="department" disabled>${departmentOptions()}</select><small>O departamento define as áreas e os dados disponíveis para a equipe CAFCM.</small></label>
       <p class="form-note">O convite será enviado ao e-mail informado. A pessoa confirma o acesso pelo link e cria a própria senha no primeiro acesso.</p>
       <button class="btn btn-primary" type="submit">Criar acesso e enviar convite</button>
     </form>`;
   }
 
   if (type === "people-import") {
+    const canRestoreHistory = profileDepartment() === "management";
     body = `<form id="people-import-form" class="dialog-form">
-      <div class="import-explainer">${icon("upload")}<div><strong>Importe pessoas sem apagar o histórico existente</strong><p>Contas já cadastradas são atualizadas pelo e-mail. Novas pessoas recebem convite para confirmar o acesso e criar a própria senha. Um backup JSON também restaura matrículas, conclusões e atividades quando os cursos ainda existem.</p></div></div>
-      <label>Arquivo CSV ou backup JSON<input name="peopleFile" type="file" accept=".csv,.json,text/csv,application/json" required /><small>Até 100 pessoas por importação. Use o modelo CSV disponível na página.</small></label>
+      <div class="import-explainer">${icon("upload")}<div><strong>Importe pessoas sem apagar o histórico existente</strong><p>Contas já cadastradas são atualizadas pelo e-mail. Novas pessoas recebem convite para confirmar o acesso e criar a própria senha.${canRestoreHistory ? " Um backup JSON também restaura matrículas, conclusões e atividades quando os cursos ainda existem." : " A restauração completa do histórico é reservada à Direção e Administração."}</p></div></div>
+      <label>${canRestoreHistory ? "Arquivo CSV ou backup JSON" : "Arquivo CSV"}<input name="peopleFile" type="file" accept="${canRestoreHistory ? ".csv,.json,text/csv,application/json" : ".csv,text/csv"}" required /><small>Até 100 pessoas por importação. Use o modelo CSV disponível na página.</small></label>
       <label class="confirmation-field"><input name="confirmImport" type="checkbox" value="yes" required /><span>Confirmo o envio de convites por e-mail para pessoas novas do arquivo.</span></label>
       <div class="form-note">Perfis existentes mantêm suas matrículas e conclusões. Senhas não são exportadas em backups.</div>
       <button class="btn btn-primary" type="submit">Validar e importar pessoas</button>
@@ -2230,6 +2374,19 @@ function normalizeImportedRole(value) {
   return role;
 }
 
+function normalizeImportedDepartment(value) {
+  const department = String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const aliases = {
+    management: "management", direcao: "management", administracao: "management", "direcao e administracao": "management",
+    vacancies: "vacancies", vagas: "vacancies", "gestao de vagas": "vacancies",
+    coordination: "coordination", coordenacao: "coordination",
+    personnel: "personnel", "departamento pessoal": "personnel", dp: "personnel",
+    hr: "hr", rh: "hr", "recursos humanos": "hr",
+    finance: "finance", financeiro: "finance",
+  };
+  return aliases[department] || department || null;
+}
+
 async function fetchAllRows(table, columns, orderColumn = null) {
   const rows = [];
   for (let page = 0; page < 50; page += 1) {
@@ -2267,6 +2424,7 @@ async function exportPeopleBackup() {
       fullName: person.fullName,
       email: person.email,
       role: person.role,
+      department: person.department || null,
       companyId: person.companyId,
       isActive: person.isActive,
       createdAt: person.createdAt,
@@ -2291,6 +2449,10 @@ function closeOverlay() {
 }
 
 async function navigate(view) {
+  if (!canAccessView(view, state.profile)) {
+    showToast("Seu departamento não possui acesso a esta área.", "error");
+    return;
+  }
   state.view = view;
   if (!["course-editor", "lesson-editor", "student-course"].includes(view)) state.selectedCourseId = null;
   if (!["lesson-editor", "student-course"].includes(view)) state.selectedLessonId = null;
@@ -2455,7 +2617,7 @@ app.addEventListener("click", async (event) => {
     return renderView();
   }
   if (target.hasAttribute("data-download-people-template")) {
-    return downloadTextFile("modelo-importacao-pessoas-cafcm.csv", "nome;email;perfil;empresa\n", "text/csv;charset=utf-8");
+    return downloadTextFile("modelo-importacao-pessoas-cafcm.csv", "nome;email;perfil;empresa;departamento\n", "text/csv;charset=utf-8");
   }
   if (target.hasAttribute("data-export-people")) {
     target.disabled = true;
@@ -2733,17 +2895,28 @@ app.addEventListener("change", (event) => {
 
   if (event.target.name === "role") {
     const companyField = document.querySelector(".company-field");
-    if (!companyField) return;
+    const departmentField = document.querySelector(".department-field");
     const role = event.target.value;
     const required = role === "company";
     const hidden = role === "cafcm_admin";
-    companyField.hidden = hidden;
-    companyField.classList.toggle("required-field", required);
-    const select = companyField.querySelector("select");
-    if (select) {
-      select.required = required;
-      select.disabled = hidden;
-      if (hidden) select.value = "";
+    if (companyField) {
+      companyField.hidden = hidden;
+      companyField.classList.toggle("required-field", required);
+      const select = companyField.querySelector("select");
+      if (select) {
+        select.required = required;
+        select.disabled = hidden;
+        if (hidden) select.value = "";
+      }
+    }
+    if (departmentField) {
+      const departmentSelect = departmentField.querySelector("select");
+      departmentField.hidden = !hidden;
+      if (departmentSelect) {
+        departmentSelect.required = hidden;
+        departmentSelect.disabled = !hidden;
+        if (hidden && !departmentSelect.value) departmentSelect.value = "management";
+      }
     }
     return;
   }
@@ -2929,6 +3102,7 @@ app.addEventListener("submit", async (event) => {
         fullName: values.fullName,
         email: values.email,
         role: values.role,
+        department: values.role === "cafcm_admin" ? values.department || "management" : null,
         companyId: values.role === "cafcm_admin" ? null : values.companyId || null,
         passwordMode: values.passwordMode || "keep",
         password: values.passwordMode === "manual" ? String(values.password || "") : null,
@@ -2956,6 +3130,7 @@ app.addEventListener("submit", async (event) => {
       let people = [];
       let importHistory = {};
       if (file.name.toLowerCase().endsWith(".json") || file.type.includes("json")) {
+        if (profileDepartment() !== "management") throw new Error("A restauração completa do histórico é reservada à Direção e Administração.");
         let backup;
         try {
           backup = JSON.parse(text);
@@ -2981,6 +3156,7 @@ app.addEventListener("submit", async (event) => {
             fullName: row.nome || row.nome_completo || row.full_name || row.fullname,
             email: row.email,
             role: normalizeImportedRole(row.perfil || row.tipo_de_acesso || row.role),
+            department: normalizeImportedDepartment(row.departamento || row.department || row.setor),
             companyId: companyReference ? companyMap.get(companyReference.toLowerCase()) || companyReference : null,
           };
         });
@@ -3195,6 +3371,7 @@ app.addEventListener("submit", async (event) => {
         fullName: values.fullName,
         email: values.email,
         role: values.role,
+        department: values.role === "cafcm_admin" ? values.department || "management" : null,
         companyId: values.role === "cafcm_admin" ? null : values.companyId || null,
       }, true);
       await renderView();
