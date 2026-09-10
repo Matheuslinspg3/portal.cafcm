@@ -1099,7 +1099,7 @@ async function renderVacancies(content) {
   if (candidates.error || vacancies.error || applications.error) throw candidates.error || vacancies.error || applications.error;
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
   const active = (vacancies.data || []).filter((item) => item.status === "open");
-  content.innerHTML = `${pageHead("Gestão de vagas", "Controle empresas aptas, candidatos, vagas abertas e cada etapa da seleção.")}
+  content.innerHTML = `${pageHead("Gestão de vagas", "Controle empresas aptas, candidatos, vagas abertas e cada etapa da seleção.", `<button class="btn btn-secondary" data-dialog="candidate">${icon("plus")} Candidato</button><button class="btn btn-secondary" data-dialog="application">${icon("link")} Iniciar seleção</button><button class="btn btn-primary" data-dialog="vacancy">${icon("plus")} Abrir vaga</button>`)}
     <section class="metric-grid">${metric("Empresas ativas", references.companies.filter((item) => item.is_active).length, "building")}${metric("Candidatos", (candidates.data || []).length, "users")}${metric("Vagas abertas", active.length, "kanban")}${metric("Em seleção", (applications.data || []).filter((item) => !["rejected", "hired"].includes(item.status)).length, "tasks")}</section>
     <section class="card"><div class="card-head"><div><span class="eyebrow">Vagas abertas</span><h2>Demandas das empresas</h2></div></div>${active.length ? `<div class="people-list">${active.map((item) => operationalRow(item.title, `${companyMap.get(item.company_id) || "Empresa"} · ${item.quantity} posição(ões)${item.due_date ? ` · prazo ${formatDate(item.due_date)}` : ""}`, "Aberta")).join("")}</div>` : emptyState("Nenhuma vaga aberta", "As próximas vagas cadastradas pelas empresas aparecerão aqui.")}</section>`;
 }
@@ -1108,7 +1108,7 @@ async function renderPartnerships(content) {
   const [agreements, references] = await Promise.all([supabase.from("partnership_agreements").select("*").order("created_at", { ascending: false }), loadOperationalReferences()]);
   if (agreements.error) throw agreements.error;
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  content.innerHTML = `${pageHead("Parcerias e jovens", "Diferencie o contrato de parceria com a empresa do contrato individual de cada jovem.")}
+  content.innerHTML = `${pageHead("Parcerias e jovens", "Diferencie o contrato de parceria com a empresa do contrato individual de cada jovem.", `<button class="btn btn-primary" data-dialog="partnership">${icon("plus")} Nova parceria</button>`)}
     <section class="card"><div class="people-list">${(agreements.data || []).length ? agreements.data.map((item) => operationalRow(companyMap.get(item.company_id) || "Empresa", `${item.title} · ${item.start_date ? formatDate(item.start_date) : "início não informado"}${item.end_date ? ` até ${formatDate(item.end_date)}` : ""}`, item.status)).join("") : emptyState("Nenhuma parceria cadastrada", "Os contratos de parceria aparecerão aqui. Os contratos dos jovens seguem no Departamento Pessoal.")}</div></section>`;
 }
 
@@ -1805,6 +1805,14 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
+  if (type === "candidate" || type === "vacancy" || type === "application" || type === "partnership") {
+    const references = await loadOperationalReferences();
+    if (type === "candidate") body = `<form id="candidate-form" class="dialog-form"><label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus /></label><div class="form-grid two-columns"><label>E-mail<input name="email" type="email" /></label><label>Telefone<input name="phone" /></label><label>Cidade<input name="city" maxlength="120" /></label><label>Status<select name="status"><option value="new">Novo</option><option value="screening">Triagem</option><option value="interview">Entrevista</option></select></label></div><label>Observações<textarea name="notes" rows="4"></textarea></label><button class="btn btn-primary">Cadastrar candidato</button></form>`;
+    if (type === "vacancy") body = `<form id="vacancy-form" class="dialog-form"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.filter((c) => c.is_active).map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select></label><label>Nome da vaga<input name="title" required maxlength="180" placeholder="Ex.: Jovem aprendiz administrativo" /></label><div class="form-grid two-columns"><label>Quantidade<input name="quantity" type="number" min="1" value="1" required /></label><label>Prazo<input name="dueDate" type="date" /></label><label>Jornada<input name="workload" maxlength="120" placeholder="Ex.: 6 horas" /></label></div><label>Requisitos<textarea name="requirements" rows="4"></textarea></label><button class="btn btn-primary">Abrir vaga</button></form>`;
+    if (type === "application") { const [candidates, vacancies] = await Promise.all([supabase.from("candidates").select("id,full_name").not("status", "in", "(rejected,hired,archived)").order("full_name"), supabase.from("job_vacancies").select("id,title,company_id").eq("status", "open")]); const companyMap = new Map(references.companies.map((c) => [c.id,c.name])); body = `<form id="application-form" class="dialog-form"><label>Candidato<select name="candidateId" required><option value="">Selecione</option>${(candidates.data||[]).map((c)=>`<option value="${c.id}">${escapeHtml(c.full_name)}</option>`).join("")}</select></label><label>Vaga<select name="vacancyId" required><option value="">Selecione</option>${(vacancies.data||[]).map((v)=>`<option value="${v.id}">${escapeHtml(v.title)} · ${escapeHtml(companyMap.get(v.company_id)||"")}</option>`).join("")}</select></label><button class="btn btn-primary">Iniciar seleção</button></form>`; }
+    if (type === "partnership") body = `<form id="partnership-form" class="dialog-form"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>Início<input name="startDate" type="date" /></label><label>Término<input name="endDate" type="date" /></label></div><label>Observações<textarea name="notes" rows="4"></textarea></label><button class="btn btn-primary">Registrar parceria</button></form>`;
+  }
+
   if (type === "person") {
     let person = state.people.find((item) => item.id === recordId);
     if (!person) {
@@ -2107,6 +2115,10 @@ async function openDialog(type, recordId = null) {
     termination: recordId ? "Alterar desligamento" : "Abrir desligamento",
     accounting: recordId ? "Alterar envio" : "Novo envio à contabilidade",
     document: "Enviar documento",
+    candidate: "Cadastrar candidato",
+    vacancy: "Abrir vaga",
+    application: "Iniciar processo seletivo",
+    partnership: "Registrar parceria",
     course: recordId ? "Alterar curso" : "Criar curso",
     invite: "Criar pessoa e enviar convite",
     lesson: recordId ? "Alterar aula" : "Adicionar aula",
@@ -2978,6 +2990,23 @@ app.addEventListener("submit", async (event) => {
       await renderView();
       renderImportResults(result);
       return;
+    }
+
+    if (form.id === "candidate-form") {
+      const { error } = await supabase.from("candidates").insert({ full_name: String(values.fullName).trim(), email: String(values.email || "").trim() || null, phone: String(values.phone || "").trim() || null, city: String(values.city || "").trim(), status: values.status, notes: String(values.notes || "").trim(), created_by: state.profile.id });
+      if (error) throw error; closeOverlay(); showToast("Candidato cadastrado."); return renderView();
+    }
+    if (form.id === "vacancy-form") {
+      const { error } = await supabase.from("job_vacancies").insert({ company_id: values.companyId, title: String(values.title).trim(), quantity: Number(values.quantity || 1), due_date: values.dueDate || null, workload: String(values.workload || "").trim(), requirements: String(values.requirements || "").trim(), created_by: state.profile.id });
+      if (error) throw error; closeOverlay(); showToast("Vaga aberta."); return renderView();
+    }
+    if (form.id === "application-form") {
+      const { error } = await supabase.from("vacancy_applications").insert({ candidate_id: values.candidateId, vacancy_id: values.vacancyId });
+      if (error?.code === "23505") throw new Error("Este candidato já está nesta vaga."); if (error) throw error; closeOverlay(); showToast("Candidato incluído no processo seletivo."); return renderView();
+    }
+    if (form.id === "partnership-form") {
+      const { error } = await supabase.from("partnership_agreements").insert({ company_id: values.companyId, start_date: values.startDate || null, end_date: values.endDate || null, notes: String(values.notes || "").trim(), created_by: state.profile.id });
+      if (error) throw error; closeOverlay(); showToast("Parceria registrada."); return renderView();
     }
 
     if (form.id === "pipeline-item-form") {
