@@ -4,6 +4,7 @@ const SUPABASE_URL = "https://cyovnmnxzrfptyfrivdr.supabase.co";
 const SUPABASE_KEY = "sb_publishable_otxl6dKO3VJ4G3qsNkfyoA_cP_EY6Lg";
 const SITE_ORIGIN = window.location.origin;
 const ADMIN_FUNCTION = `${SUPABASE_URL}/functions/v1/portal-admin`;
+const AUTOMATION_FUNCTION = `${SUPABASE_URL}/functions/v1/portal-automation`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -39,6 +40,7 @@ const state = {
   pipelineSort: "recent",
   taskFilter: "mine",
   notificationUnreadCount: 0,
+  notificationFilter: "open",
   draggedPipelineItemId: null,
   vacancyTab: "overview",
   vacancySearch: "",
@@ -50,6 +52,7 @@ const state = {
   documentTab: "files",
   documentSearch: "",
   documentCategory: "",
+  automationTab: "overview",
 };
 
 const roleLabels = {
@@ -199,6 +202,7 @@ const viewPermissions = {
   pipelines: "operations.read",
   tasks: "operations.read",
   notifications: "operations.read",
+  automations: "operations.read",
   vacancies: "vacancies.read",
   partnerships: "vacancies.read",
   companies: "companies.read",
@@ -344,6 +348,7 @@ const navigation = {
       ["pipelines", "Central de Esteiras", "kanban"],
       ["tasks", "Tarefas e Pendências", "tasks"],
       ["notifications", "Notificações", "bell"],
+      ["automations", "Automações", "clock"],
     ] },
     { label: "Gestão de vagas", items: [
       ["vacancies", "Vagas e candidatos", "kanban"],
@@ -661,6 +666,7 @@ function viewTitle(view) {
     pipelines: ["Central de Esteiras", "Processos da operação CAFCM"],
     tasks: ["Tarefas e Pendências", "Responsáveis, prazos e checklists"],
     notifications: ["Notificações", "Atualizações direcionadas ao seu acesso"],
+    automations: ["Automações", "Alertas, documentos e comunicações"],
     companies: ["Empresas", "Parceiros vinculados aos aprendizes"],
     apprentices: ["Jovens / Aprendizes", "Cadastro central dos jovens"],
     admissions: ["Admissões", "Documentos, contratos e início do jovem"],
@@ -758,6 +764,27 @@ async function callAdmin(payload, authenticated = false) {
   if (!response.ok) {
     const error = new Error(body.error || "Não foi possível concluir a operação.");
     error.code = body.code || null;
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+async function callAutomation(payload) {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session?.access_token) throw new Error("Sua sessão expirou. Entre novamente.");
+  const response = await fetch(AUTOMATION_FUNCTION, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${data.session.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error || "Não foi possível concluir a operação.");
     error.status = response.status;
     throw error;
   }
@@ -933,6 +960,7 @@ async function renderPortal() {
       .from("notifications")
       .select("*", { count: "exact", head: true })
       .eq("recipient_id", profile.id)
+      .eq("status", "open")
       .eq("is_read", false);
     state.notificationUnreadCount = count || 0;
   } else {
@@ -980,6 +1008,7 @@ async function renderView() {
       pipelines: renderPipelines,
       tasks: renderTasks,
       notifications: renderNotifications,
+      automations: renderAutomations,
       companies: renderCompanies,
       apprentices: renderApprentices,
       admissions: renderAdmissions,
@@ -1097,7 +1126,7 @@ async function renderAdminOverview(content) {
     ...openProcesses.filter((item) => isOverdue(item.due_at)).map((item) => ({ ...item, kind: "process" })),
   ].sort((first, second) => new Date(first.due_at) - new Date(second.due_at));
   const alertView = {
-    contract: "contracts", admission: "admissions", document: "admissions", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves",
+    contract: "contracts", admission: "admissions", document: "documents", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves", vacancy: "vacancies", recruitment: "vacancies", finance: "finance", academic: "courses",
   };
   const persistedAlerts = (alertResult.data || [])
     .map((item) => ({ ...item, kind: "alert", target: alertView[item.category] || "overview" }))
@@ -1332,19 +1361,97 @@ async function renderTasks(content) {
 async function renderNotifications(content) {
   const { data, error } = await supabase.from("notifications").select("*").eq("recipient_id", state.profile.id).order("created_at", { ascending: false }).limit(200);
   if (error) throw error;
-  const unread = (data || []).filter((item) => !item.is_read).length;
+  const notifications = data || [];
+  const unread = notifications.filter((item) => !item.is_read && (item.status || "open") === "open").length;
+  const open = notifications.filter((item) => (item.status || "open") === "open");
+  const resolved = notifications.filter((item) => item.status === "resolved");
+  const visible = state.notificationFilter === "unread"
+    ? notifications.filter((item) => !item.is_read && (item.status || "open") === "open")
+    : state.notificationFilter === "resolved"
+      ? resolved
+      : state.notificationFilter === "all"
+        ? notifications
+        : open;
   state.notificationUnreadCount = unread;
   content.innerHTML = `
-    ${pageHead("Notificações", "Consulte novas atribuições e atualizações direcionadas ao seu acesso.", unread ? `<button class="btn btn-secondary" data-read-all-notifications>${icon("check")} Marcar todas como lidas</button>` : "")}
-    <section class="notification-summary">${metric("Não lidas", unread, "bell")}${metric("Total exibido", (data || []).length, "history")}</section>
+    ${pageHead("Notificações", "Consulte tarefas, prazos e alertas direcionados ao seu trabalho.", unread ? `<button class="btn btn-secondary" data-read-all-notifications>${icon("check")} Marcar todas como lidas</button>` : "")}
+    <section class="notification-summary">${metric("Não lidas", unread, "bell")}${metric("Em aberto", open.length, "tasks")}${metric("Resolvidas", resolved.length, "check")}</section>
+    <nav class="operations-tabs" aria-label="Filtros de notificações">${[["open", "Em aberto", open.length], ["unread", "Não lidas", unread], ["resolved", "Resolvidas", resolved.length], ["all", "Todas", notifications.length]].map(([value, label, count]) => `<button class="${state.notificationFilter === value ? "active" : ""}" data-notification-filter="${value}">${label}<span>${count}</span></button>`).join("")}</nav>
     <section class="card notification-list">
-      ${(data || []).length ? data.map((item) => `<article class="notification-row ${item.is_read ? "" : "unread"}">
+      ${visible.length ? visible.map((item) => {
+        const destination = item.target_view || (item.entity_type === "task" ? "tasks" : item.entity_type === "pipeline_item" ? "pipelines" : "notifications");
+        const canOpen = destination !== "notifications" && canAccessView(destination);
+        return `<article class="notification-row ${item.is_read ? "" : "unread"}">
         <span class="notification-symbol notification-${item.kind}">${icon(item.kind === "urgent" || item.kind === "attention" ? "alert" : item.kind === "task" ? "tasks" : "bell")}</span>
-        <div><div class="notification-title"><strong>${escapeHtml(item.title)}</strong>${item.is_read ? "" : `<span>Nova</span>`}</div><p>${escapeHtml(item.message)}</p><small>${formatDate(item.created_at, true)}</small></div>
-        <div class="notification-actions">${item.entity_type === "task" ? `<button class="btn btn-small btn-secondary" data-open-notification="${item.id}" data-notification-target="tasks">Abrir tarefa</button>` : item.entity_type === "pipeline_item" ? `<button class="btn btn-small btn-secondary" data-open-notification="${item.id}" data-notification-target="pipelines">Abrir processo</button>` : ""}${!item.is_read ? `<button class="text-link" data-read-notification="${item.id}">Marcar como lida</button>` : ""}</div>
-      </article>`).join("") : emptyState("Nenhuma notificação", "As novas atribuições de tarefas aparecerão aqui.")}
+        <div><div class="notification-title"><strong>${escapeHtml(item.title)}</strong>${item.is_read ? "" : `<span>Nova</span>`}${item.status === "resolved" ? `<span class="notification-resolved">Resolvida</span>` : ""}</div><p>${escapeHtml(item.message)}</p><small>${item.due_at ? `Prazo ${formatDate(item.due_at, true)} · ` : ""}${formatDate(item.created_at, true)}</small></div>
+        <div class="notification-actions">${canOpen ? `<button class="btn btn-small btn-secondary" data-open-notification="${item.id}" data-notification-target="${destination}">Abrir</button>` : ""}${!item.is_read ? `<button class="text-link" data-read-notification="${item.id}">Marcar como lida</button>` : ""}${(item.status || "open") === "open" ? `<button class="text-link" data-dismiss-notification="${item.id}">Dispensar</button>` : ""}</div>
+      </article>`;
+      }).join("") : emptyState("Nenhuma notificação nesta visão", "Os avisos aparecem aqui quando uma tarefa ou prazo exige sua atenção.")}
     </section>
   `;
+}
+
+async function renderAutomations(content) {
+  const canEmail = hasPermission("finance.read");
+  const canDocuments = hasPermission("documents.read");
+  const canBanking = hasPermission("finance.read");
+  const [runsResult, alertsResult, emailsResult, generationsResult, bankingResult] = await Promise.all([
+    supabase.from("automation_runs").select("*").order("started_at", { ascending: false }).limit(30),
+    supabase.from("operational_alerts").select("*").order("last_seen_at", { ascending: false }).limit(150),
+    canEmail ? supabase.from("email_deliveries").select("*").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
+    canDocuments ? supabase.from("document_generations").select("*").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
+    canBanking ? supabase.from("banking_integrations").select("*").order("created_at", { ascending: false }).limit(10) : Promise.resolve({ data: [], error: null }),
+  ]);
+  const failed = [runsResult, alertsResult, emailsResult, generationsResult, bankingResult].find((result) => result.error);
+  if (failed) throw failed.error;
+  const runs = runsResult.data || [];
+  const alerts = alertsResult.data || [];
+  const emails = emailsResult.data || [];
+  const generations = generationsResult.data || [];
+  const banking = bankingResult.data || [];
+  const activeAlerts = alerts.filter((item) => item.status === "active");
+  const latestRun = runs[0];
+  const tabs = [
+    ["overview", "Visão geral", activeAlerts.length],
+    ...(canEmail ? [["emails", "E-mails", emails.length]] : []),
+    ...(canDocuments ? [["documents", "Documentos", generations.length]] : []),
+    ...(canBanking ? [["banking", "Bradesco", banking.length]] : []),
+    ["history", "Histórico", runs.length],
+  ];
+  if (!tabs.some(([value]) => value === state.automationTab)) state.automationTab = "overview";
+  const actions = state.automationTab === "emails" && hasPermission("finance.manage")
+    ? `<button class="btn btn-primary" data-dialog="email-draft">${icon("mail")} Preparar e-mail</button>`
+    : state.automationTab === "documents" && hasPermission("documents.manage")
+      ? `<button class="btn btn-primary" data-dialog="document-generation">${icon("plus")} Gerar documento</button>`
+      : state.automationTab === "banking" && hasPermission("finance.manage")
+        ? `<button class="btn btn-primary" data-dialog="banking-integration">${icon("plus")} Configurar Bradesco</button>`
+        : state.automationTab === "overview" && hasPermission("operations.manage")
+          ? `<button class="btn btn-primary" data-run-automations>${icon("arrow")} Atualizar agora</button>`
+          : "";
+
+  let body = "";
+  if (state.automationTab === "overview") {
+    body = `<section class="metric-grid">${metric("Alertas ativos", activeAlerts.length, "alert")}${metric("Urgentes", activeAlerts.filter((item) => item.severity === "urgent").length, "clock")}${metric("Tarefas geradas", latestRun?.tasks_open ?? 0, "tasks")}${metric("Última atualização", latestRun ? formatDate(latestRun.finished_at || latestRun.started_at, true) : "Ainda não executada", "history")}</section>
+      <section class="card"><div class="card-head"><div><span class="eyebrow">Controle operacional</span><h2>O que o Portal automatiza</h2></div></div><div class="automation-principles"><div>${icon("check")}<span><strong>Faz automaticamente</strong><small>Identifica prazos, evita avisos duplicados, cria lembretes e encerra pendências derivadas quando a origem é resolvida.</small></span></div><div>${icon("shield")}<span><strong>Permanece com a equipe</strong><small>Aprovações, decisões financeiras, contratações, desligamentos, envio externo e revisão final de documentos.</small></span></div></div></section>
+      <section class="card"><div class="card-head"><div><span class="eyebrow">Alertas atuais</span><h2>Providências identificadas</h2></div></div><div class="people-list">${activeAlerts.length ? activeAlerts.map((item) => operationalRow(item.title, `${item.message}${item.due_on ? ` · referência ${formatDate(item.due_on)}` : ""}`, item.severity === "urgent" ? "Urgente" : item.severity === "attention" ? "Atenção" : "Informativo", `<button class="btn btn-small btn-secondary" data-nav="${({ contract: "contracts", admission: "admissions", document: "documents", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves", vacancy: "vacancies", recruitment: "vacancies", finance: "finance", academic: "courses" })[item.category] || "overview"}">Abrir área</button>`)).join("") : emptyState("Nenhum alerta ativo", "A rotina automática não encontrou pendências dentro dos critérios configurados.")}</div></section>`;
+  }
+  if (state.automationTab === "emails") {
+    const labels = { draft: "Rascunho", approved: "Aprovado", queued: "Na fila", sending: "Enviando", sent: "Enviado", failed: "Falhou", cancelled: "Cancelado" };
+    body = `<section class="card phase-note">${icon("shield")}<div><strong>Envio sob confirmação humana</strong><p>O Portal prepara e registra o e-mail. Uma pessoa autorizada confere destinatário, assunto, conteúdo e anexo antes de enviar.</p></div></section><section class="card"><div class="people-list">${emails.length ? emails.map((item) => operationalRow(item.subject, `${item.recipient_email} · ${formatDate(item.created_at, true)}${item.error_message ? ` · ${item.error_message}` : ""}`, labels[item.status] || item.status, `<div class="person-actions">${["draft", "failed", "approved"].includes(item.status) && hasPermission("finance.manage") ? `<button class="btn btn-small btn-secondary" data-edit-email-draft="${item.id}">${icon("edit")} Conferir</button><button class="btn btn-small btn-primary" data-send-email="${item.id}">Enviar</button>` : ""}</div>`)).join("") : emptyState("Nenhum e-mail preparado", "Crie um rascunho a partir de um modelo e confira antes do envio.", hasPermission("finance.manage") ? `<button class="btn btn-primary" data-dialog="email-draft">Preparar e-mail</button>` : "")}</div></section>`;
+  }
+  if (state.automationTab === "documents") {
+    const labels = { draft: "Aguardando revisão", approved: "Aprovado", rejected: "Rejeitado" };
+    body = `<section class="card phase-note">${icon("upload")}<div><strong>PDF com protocolo e versão</strong><p>Documentos gerados entram como rascunho. O arquivo só deve ser usado externamente depois da conferência e aprovação da equipe.</p></div></section><section class="card"><div class="people-list">${generations.length ? generations.map((item) => operationalRow(item.title, `Versão ${item.version} · ${formatDate(item.created_at, true)}${item.notes ? ` · ${item.notes}` : ""}`, labels[item.status] || item.status, `<div class="person-actions">${item.document_id ? `<button class="btn btn-small btn-secondary" data-download-document="${item.document_id}">${icon("download")} Baixar</button>` : ""}${item.status === "draft" && hasPermission("documents.manage") ? `<button class="btn btn-small btn-primary" data-review-generation="${item.id}" data-review-status="approved">Aprovar</button><button class="btn btn-small btn-quiet" data-review-generation="${item.id}" data-review-status="rejected">Rejeitar</button>` : ""}</div>`)).join("") : emptyState("Nenhum documento gerado", "Use um modelo para criar um PDF vinculado ao cadastro real.", hasPermission("documents.manage") ? `<button class="btn btn-primary" data-dialog="document-generation">Gerar documento</button>` : "")}</div></section>`;
+  }
+  if (state.automationTab === "banking") {
+    const labels = { awaiting_documents: "Aguardando documentação", configuring: "Em configuração", homologation: "Em homologação", active: "Ativa", inactive: "Inativa" };
+    body = `<section class="card banking-readiness"><div class="card-head"><div><span class="eyebrow">Integração bancária</span><h2>Preparação para o Bradesco</h2></div><span class="status status-draft">Sem conexão automática</span></div><p>O cadastro abaixo organiza as informações necessárias. A emissão de boletos, CNAB e conciliação só será ativada após receber o leiaute oficial, convênio, carteira, credenciais e homologação do banco.</p><div class="readiness-checklist"><span>${icon("check")} Convênio e carteira</span><span>${icon("check")} Leiaute CNAB oficial</span><span>${icon("check")} Credenciais ou canal de troca</span><span>${icon("check")} Homologação com o banco</span></div></section><section class="card"><div class="people-list">${banking.length ? banking.map((item) => operationalRow(`${item.provider} · ${item.integration_mode.toUpperCase()}`, `Banco ${item.bank_code}${item.agreement_number ? ` · convênio ${item.agreement_number}` : " · convênio não informado"}${item.layout_version ? ` · leiaute ${item.layout_version}` : ""}`, labels[item.status] || item.status, hasPermission("finance.manage") ? `<button class="btn btn-small btn-secondary" data-edit-banking-integration="${item.id}">${icon("edit")} Alterar</button>` : "")).join("") : emptyState("Integração ainda não configurada", "Cadastre somente os dados confirmados pelo gerente do Bradesco; nenhum boleto será emitido nesta etapa.", hasPermission("finance.manage") ? `<button class="btn btn-primary" data-dialog="banking-integration">Iniciar configuração</button>` : "")}</div></section>`;
+  }
+  if (state.automationTab === "history") {
+    const labels = { completed: "Concluída", failed: "Falhou", running: "Em execução" };
+    body = `<section class="card"><div class="people-list">${runs.length ? runs.map((item) => operationalRow(item.run_source === "manual" ? "Atualização solicitada pela equipe" : item.run_source === "schedule" ? "Atualização agendada" : "Atualização do sistema", `${formatDate(item.started_at, true)} · ${item.alerts_active} alertas · ${item.notifications_open} notificações · ${item.tasks_open} tarefas${item.error_message ? ` · ${item.error_message}` : ""}`, labels[item.status] || item.status)).join("") : emptyState("Nenhuma execução registrada", "O histórico será formado nas próximas atualizações.")}</div></section>`;
+  }
+  content.innerHTML = `${pageHead("Automações", "Reduza controles repetitivos sem retirar da equipe as decisões importantes.", actions)}<nav class="operations-tabs" aria-label="Áreas de automação">${tabs.map(([value, label, count]) => `<button class="${state.automationTab === value ? "active" : ""}" data-automation-tab="${value}">${label}<span>${count}</span></button>`).join("")}</nav>${body}`;
 }
 
 async function renderApprentices(content) {
@@ -2751,6 +2858,42 @@ async function openDialog(type, recordId = null) {
     }
   }
 
+  if (type === "email-draft") {
+    let delivery = {};
+    if (recordId) {
+      const { data, error } = await supabase.from("email_deliveries").select("*").eq("id", recordId).single();
+      if (error) throw error;
+      delivery = data;
+    }
+    const [{ data: templates, error: templateError }, { data: documents, error: documentError }] = await Promise.all([
+      supabase.from("email_templates").select("*").eq("is_active", true).order("name"),
+      supabase.from("document_records").select("id,title").eq("is_archived", false).order("created_at", { ascending: false }).limit(150),
+    ]);
+    if (templateError || documentError) throw templateError || documentError;
+    const selected = (templates || []).find((item) => item.id === delivery.template_id) || templates?.[0] || {};
+    body = `<form id="email-draft-form" class="dialog-form wide-form"><input type="hidden" name="deliveryId" value="${escapeHtml(delivery.id || "")}" /><label>Modelo<select name="templateId" required data-email-template><option value="">Selecione</option>${(templates || []).map((item) => `<option value="${item.id}" data-subject="${escapeHtml(item.subject)}" data-body="${escapeHtml(item.body)}" ${item.id === selected.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>Destinatário<input name="recipientEmail" type="email" required maxlength="320" placeholder="financeiro@empresa.com.br" value="${escapeHtml(delivery.recipient_email || "")}" /></label><label>Anexo opcional<select name="attachmentDocumentId"><option value="">Sem anexo</option>${(documents || []).map((item) => `<option value="${item.id}" ${item.id === delivery.attachment_document_id ? "selected" : ""}>${escapeHtml(item.title)}</option>`).join("")}</select></label></div><label>Assunto<input name="subject" required minlength="2" maxlength="240" value="${escapeHtml(delivery.subject || selected.subject || "")}" /></label><label>Conteúdo<textarea name="body" rows="12" required maxlength="100000">${escapeHtml(delivery.body || selected.body || "")}</textarea><small>Substitua os campos entre chaves pelas informações reais antes de salvar.</small></label><p class="form-note">O rascunho não será enviado automaticamente. Depois de salvar, use “Conferir e enviar”.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar conferência" : "Salvar rascunho"}</button></form>`;
+  }
+
+  if (type === "document-generation") {
+    const [{ data: templates, error: templateError }, references] = await Promise.all([
+      supabase.from("document_templates").select("id,name,category").eq("is_active", true).order("name"),
+      loadOperationalReferences(),
+    ]);
+    if (templateError) throw templateError;
+    body = `<form id="document-generation-form" class="dialog-form wide-form"><label>Modelo do documento<select name="templateId" required><option value="">Selecione</option>${(templates || []).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((item) => `<option value="${item.id}">${escapeHtml(item.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId"><option value="">Usar a empresa do jovem</option>${references.companies.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label><label>Período<input name="periodo" maxlength="300" placeholder="Ex.: 10/02/2026 a 10/02/2027" /></label><label>Prazo<input name="prazo" maxlength="120" placeholder="Ex.: 15/09/2026" /></label><label>Competência<input name="competencia" maxlength="120" placeholder="Ex.: setembro de 2026" /></label><label>Valor informado<input name="valor" maxlength="120" placeholder="Ex.: R$ 1.250,00" /></label></div><label>Documentos solicitados<textarea name="documentos" rows="3" maxlength="2000" placeholder="Liste os documentos quando o modelo exigir"></textarea></label><label>Descrição<textarea name="descricao" rows="3" maxlength="1000"></textarea></label><label>Observações do documento<textarea name="observacoes" rows="4" maxlength="4000"></textarea></label><label>Notas internas da revisão<textarea name="notes" rows="3" maxlength="12000"></textarea></label><p class="form-note">O PDF receberá protocolo, versão e situação “Aguardando revisão”. Dados não preenchidos serão identificados como não informados.</p><button class="btn btn-primary" type="submit">Gerar PDF para revisão</button></form>`;
+  }
+
+  if (type === "banking-integration") {
+    let item = {};
+    if (recordId) {
+      const { data, error } = await supabase.from("banking_integrations").select("*").eq("id", recordId).single();
+      if (error) throw error;
+      item = data;
+    }
+    const statusLabels = { awaiting_documents: "Aguardando documentação", configuring: "Em configuração", homologation: "Em homologação", active: "Ativa", inactive: "Inativa" };
+    body = `<form id="banking-integration-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Banco<input value="Bradesco · 237" disabled /></label><label>Modelo de integração<select name="integrationMode"><option value="cnab240" ${item.integration_mode === "cnab240" ? "selected" : ""}>CNAB 240</option><option value="cnab400" ${item.integration_mode === "cnab400" ? "selected" : ""}>CNAB 400</option><option value="api" ${item.integration_mode === "api" ? "selected" : ""}>API bancária</option></select></label><label>Situação<select name="status">${selectOptions(statusLabels, item.status || "awaiting_documents")}</select></label><label>Número do convênio<input name="agreementNumber" maxlength="80" value="${escapeHtml(item.agreement_number || "")}" /></label><label>Carteira<input name="walletCode" maxlength="40" value="${escapeHtml(item.wallet_code || "")}" /></label><label>Versão do leiaute<input name="layoutVersion" maxlength="40" value="${escapeHtml(item.layout_version || "")}" /></label><label>Agência<input name="agency" maxlength="20" value="${escapeHtml(item.agency || "")}" /></label><label>Referência da conta<input name="accountReference" maxlength="40" value="${escapeHtml(item.account_reference || "")}" /></label></div><label>Informações recebidas do banco<textarea name="notes" rows="7" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><p class="form-note">Não informe senha, token, chave privada ou segredo neste formulário. A situação “Ativa” deve ser usada somente após homologação confirmada pelo Bradesco.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar configuração" : "Criar preparação"}</button></form>`;
+  }
+
   if (type === "lesson") {
     let lesson = {};
     if (recordId) {
@@ -2841,6 +2984,9 @@ async function openDialog(type, recordId = null) {
     "document-edit": "Alterar documento",
     "document-requirement": recordId ? "Alterar pendência documental" : "Nova pendência documental",
     "financial-charge": recordId ? "Alterar cobrança" : "Nova cobrança",
+    "email-draft": recordId ? "Conferir e-mail" : "Preparar e-mail",
+    "document-generation": "Gerar documento",
+    "banking-integration": recordId ? "Alterar preparação Bradesco" : "Preparar integração Bradesco",
     candidate: recordId ? "Candidato e histórico" : "Cadastrar candidato",
     vacancy: recordId ? "Alterar vaga" : "Abrir vaga",
     application: recordId ? "Atualizar processo seletivo" : "Iniciar processo seletivo",
@@ -2854,7 +3000,7 @@ async function openDialog(type, recordId = null) {
     enrollment: "Nova matrícula",
     response: "Responder atividade",
   };
-  const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "leave", "termination", "accounting", "document", "document-requirement", "financial-charge", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
+  const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "leave", "termination", "accounting", "document", "document-requirement", "financial-charge", "email-draft", "document-generation", "banking-integration", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
   root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>${body}</section></div>`;
 }
 
@@ -3084,6 +3230,14 @@ app.addEventListener("click", async (event) => {
     state.documentTab = target.dataset.documentTab;
     return renderView();
   }
+  if (target.dataset.notificationFilter) {
+    state.notificationFilter = target.dataset.notificationFilter;
+    return renderView();
+  }
+  if (target.dataset.automationTab) {
+    state.automationTab = target.dataset.automationTab;
+    return renderView();
+  }
   if (target.dataset.openProcedurePipeline) {
     state.selectedPipelineId = target.dataset.openProcedurePipeline;
     return navigate("pipelines");
@@ -3161,6 +3315,46 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.editFinancialCharge) return openDialog("financial-charge", target.dataset.editFinancialCharge);
   if (target.dataset.editDocument) return openDialog("document-edit", target.dataset.editDocument);
   if (target.dataset.editDocumentRequirement) return openDialog("document-requirement", target.dataset.editDocumentRequirement);
+  if (target.dataset.editBankingIntegration) return openDialog("banking-integration", target.dataset.editBankingIntegration);
+  if (target.dataset.editEmailDraft) return openDialog("email-draft", target.dataset.editEmailDraft);
+  if (target.hasAttribute("data-run-automations")) {
+    target.disabled = true;
+    try {
+      const { data, error } = await supabase.rpc("run_portal_automations");
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || "A atualização não foi concluída.");
+      showToast(`Atualização concluída: ${data.alerts_active} alerta(s) ativo(s).`);
+      return renderView();
+    } catch (error) {
+      showToast(friendlyError(error), "error");
+    } finally {
+      if (target.isConnected) target.disabled = false;
+    }
+    return;
+  }
+  if (target.dataset.sendEmail) {
+    if (!window.confirm("Você conferiu o destinatário, o assunto, o conteúdo e o anexo deste e-mail?")) return;
+    target.disabled = true;
+    try {
+      await callAutomation({ action: "send_email", deliveryId: target.dataset.sendEmail });
+      showToast("E-mail enviado e registrado.");
+      return renderView();
+    } catch (error) {
+      showToast(friendlyError(error), "error");
+    } finally {
+      if (target.isConnected) target.disabled = false;
+    }
+    return;
+  }
+  if (target.dataset.reviewGeneration) {
+    const status = target.dataset.reviewStatus;
+    const question = status === "approved" ? "Aprovar este documento após a conferência?" : "Rejeitar esta versão do documento?";
+    if (!window.confirm(question)) return;
+    const { error } = await supabase.from("document_generations").update({ status, reviewed_by: state.profile.id, reviewed_at: new Date().toISOString() }).eq("id", target.dataset.reviewGeneration).eq("status", "draft");
+    if (error) return showToast(friendlyError(error), "error");
+    showToast(status === "approved" ? "Documento aprovado." : "Versão rejeitada e preservada no histórico.");
+    return renderView();
+  }
   if (target.dataset.archiveDocument) {
     const archived = target.dataset.documentArchived === "true";
     if (!archived && !window.confirm("Arquivar este documento? O arquivo e o histórico serão preservados.")) return;
@@ -3204,8 +3398,15 @@ app.addEventListener("click", async (event) => {
     showToast("Notificação marcada como lida.");
     return renderPortal();
   }
+  if (target.dataset.dismissNotification) {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("notifications").update({ status: "dismissed", resolved_at: now, is_read: true, read_at: now }).eq("id", target.dataset.dismissNotification);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Notificação dispensada. O alerta de origem continua no histórico.");
+    return renderPortal();
+  }
   if (target.hasAttribute("data-read-all-notifications")) {
-    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("recipient_id", state.profile.id).eq("is_read", false);
+    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("recipient_id", state.profile.id).eq("status", "open").eq("is_read", false);
     if (error) return showToast(friendlyError(error), "error");
     showToast("Todas as notificações foram marcadas como lidas.");
     return renderPortal();
@@ -3506,6 +3707,16 @@ app.addEventListener("click", async (event) => {
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.matches("[data-email-template]")) {
+    const option = event.target.selectedOptions?.[0];
+    const form = event.target.closest("form");
+    if (form && option) {
+      form.elements.subject.value = option.dataset.subject || "";
+      form.elements.body.value = option.dataset.body || "";
+    }
+    return;
+  }
+
   if (event.target.matches("[data-pipeline-select]")) {
     state.selectedPipelineId = event.target.value;
     state.pipelineSearch = "";
@@ -4131,6 +4342,64 @@ app.addEventListener("submit", async (event) => {
       const { error } = values.id ? await supabase.from("document_requirements").update(payload).eq("id", values.id) : await supabase.from("document_requirements").insert({ ...payload, created_by: state.profile.id });
       if (error) throw error;
       closeOverlay(); showToast(values.id ? "Pendência documental atualizada." : "Pendência documental criada."); return renderView();
+    }
+
+    if (form.id === "email-draft-form") {
+      const payload = {
+        template_id: values.templateId || null,
+        recipient_email: String(values.recipientEmail || "").trim().toLowerCase(),
+        subject: String(values.subject || "").trim(),
+        body: String(values.body || "").trim(),
+        status: "draft",
+        attachment_document_id: values.attachmentDocumentId || null,
+        created_by: state.profile.id,
+      };
+      const { error } = values.deliveryId
+        ? await supabase.from("email_deliveries").update({ ...payload, error_message: null }).eq("id", values.deliveryId)
+        : await supabase.from("email_deliveries").insert(payload);
+      if (error) throw error;
+      closeOverlay(); showToast(values.deliveryId ? "Conferência salva. O e-mail continua aguardando envio." : "Rascunho salvo. Confira todos os dados antes de enviar."); return renderView();
+    }
+
+    if (form.id === "document-generation-form") {
+      if (!values.apprenticeId && !values.companyId) throw new Error("Vincule o documento a um jovem ou uma empresa.");
+      await callAutomation({
+        action: "generate_document",
+        templateId: values.templateId,
+        apprenticeId: values.apprenticeId || null,
+        companyId: values.companyId || null,
+        fields: {
+          periodo: values.periodo,
+          prazo: values.prazo,
+          competencia: values.competencia,
+          valor: values.valor,
+          documentos: values.documentos,
+          descricao: values.descricao,
+          observacoes: values.observacoes,
+        },
+        notes: values.notes,
+      });
+      closeOverlay(); showToast("PDF gerado. Confira o arquivo antes de aprovar."); return renderView();
+    }
+
+    if (form.id === "banking-integration-form") {
+      if (values.status === "active" && !window.confirm("O Bradesco confirmou a homologação desta integração?")) throw new Error("Mantenha a situação em homologação até a confirmação oficial do banco.");
+      const payload = {
+        integration_mode: values.integrationMode,
+        status: values.status,
+        agreement_number: valueOrNull(values.agreementNumber),
+        wallet_code: valueOrNull(values.walletCode),
+        layout_version: valueOrNull(values.layoutVersion),
+        agency: valueOrNull(values.agency),
+        account_reference: valueOrNull(values.accountReference),
+        notes: String(values.notes || "").trim(),
+        homologated_at: values.status === "active" ? new Date().toISOString() : null,
+      };
+      const { error } = values.id
+        ? await supabase.from("banking_integrations").update(payload).eq("id", values.id)
+        : await supabase.from("banking_integrations").insert({ ...payload, created_by: state.profile.id });
+      if (error) throw error;
+      closeOverlay(); showToast("Preparação bancária salva. Nenhuma operação foi enviada ao banco."); return renderView();
     }
 
     if (form.id === "task-form") {

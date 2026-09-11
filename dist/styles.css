@@ -2083,7 +2083,7 @@ input:focus, select:focus, textarea:focus {
 .task-check-item.complete > span { border-color: var(--green); background: var(--green); }
 .task-check-item.complete em { color: #8490a0; text-decoration: line-through; }
 
-.notification-summary { margin-bottom: 17px; display: grid; grid-template-columns: repeat(2, minmax(0, 260px)); gap: 14px; }
+.notification-summary { margin-bottom: 17px; display: grid; grid-template-columns: repeat(3, minmax(0, 260px)); gap: 14px; }
 .notification-list { padding-block: 7px; }
 .notification-row { min-height: 88px; padding: 15px 2px; border-top: 1px solid #edf1f5; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; }
 .notification-row:first-child { border-top: 0; }
@@ -2095,6 +2095,7 @@ input:focus, select:focus, textarea:focus {
 .notification-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .notification-title strong { color: var(--navy); font-size: .88rem; }
 .notification-title span { padding: 3px 6px; border-radius: 6px; color: #fff; background: var(--blue); font-size: .58rem; font-weight: 800; text-transform: uppercase; }
+.notification-title .notification-resolved { color: #23753d; background: #e8f7ed; }
 .notification-row p { margin: 5px 0; color: var(--muted); font-size: .8rem; }
 .notification-row small { color: #8793a3; font-size: .68rem; }
 .notification-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
@@ -2147,6 +2148,22 @@ input:focus, select:focus, textarea:focus {
 .administrative-module-card strong { color: var(--navy); font-size: .88rem; }
 .administrative-module-card small { margin-top: 5px; color: var(--muted); font-size: .72rem; line-height: 1.42; }
 
+.automation-principles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.automation-principles > div { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #f9fbfe; }
+.automation-principles > div > .icon { flex: 0 0 auto; width: 22px; color: var(--blue); }
+.automation-principles strong, .automation-principles small { display: block; }
+.automation-principles strong { color: var(--navy); font-size: .88rem; }
+.automation-principles small { margin-top: 5px; color: var(--muted); font-size: .76rem; line-height: 1.55; }
+.phase-note { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 17px; }
+.phase-note > .icon { flex: 0 0 auto; width: 24px; color: var(--blue); }
+.phase-note strong { color: var(--navy); }
+.phase-note p { margin: 5px 0 0; color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.banking-readiness { margin-bottom: 17px; }
+.banking-readiness > p { max-width: 920px; margin: 0 0 17px; color: var(--muted); font-size: .82rem; line-height: 1.6; }
+.readiness-checklist { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.readiness-checklist span { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; color: var(--navy); background: #f9fbfe; font-size: .73rem; font-weight: 700; }
+.readiness-checklist .icon { width: 17px; color: var(--blue); }
+
 .finance-row { grid-template-columns: auto minmax(210px, 1fr) minmax(115px, auto) minmax(125px, auto) auto; }
 .finance-amount small,
 .finance-amount strong { display: block; }
@@ -2160,6 +2177,7 @@ input:focus, select:focus, textarea:focus {
   .task-side { grid-column: 2; min-height: auto; padding: 13px 0 0; border: 0; border-top: 1px solid #edf1f5; grid-template-columns: 1fr auto auto; align-items: center; }
   .apprentice-row { grid-template-columns: auto minmax(180px, 1fr) auto; }
   .administrative-hub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .readiness-checklist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .finance-row { grid-template-columns: auto minmax(180px, 1fr) auto; }
   .finance-amount,
   .finance-row .person-access,
@@ -2187,12 +2205,14 @@ input:focus, select:focus, textarea:focus {
   .notification-actions { grid-column: 2; justify-content: flex-start; }
   .notification-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .administrative-hub-grid { grid-template-columns: 1fr; }
+  .automation-principles { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 500px) {
   .kanban-shell { margin: 0 -15px; padding-inline: 15px; }
   .kanban-column { width: min(86vw, 302px); flex-basis: min(86vw, 302px); }
   .notification-summary { grid-template-columns: 1fr; }
+  .readiness-checklist { grid-template-columns: 1fr; }
   .notification-actions .btn { width: 100%; }
   .dialog-form-actions .btn { width: 100%; }
   .apprentice-row { grid-template-columns: auto 1fr; }

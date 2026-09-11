@@ -8,6 +8,7 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Central de Esteiras:** processos comerciais, recrutamento, admissões, contratos, desligamentos, financeiro e departamento pessoal em quadros Kanban.
 - **Tarefas e Pendências:** responsáveis, prioridades, prazos, vínculos com processos e listas de verificação.
 - **Notificações:** avisos de atribuição e acesso direto ao item relacionado.
+- **Automações:** alertas de prazo, tarefas deduplicadas, documentos com revisão, e-mails conferidos pela equipe e preparação da futura integração bancária.
 - **Empresas e Jovens:** cadastros, vínculos, acompanhamento e histórico.
 - **Gestão de Vagas:** vagas, capacidade disponível, candidatos, currículos, encaminhamentos e retorno das empresas.
 - **Admissões e Contratos:** conversão do aprovado em jovem, checklist personalizável, vigência e alertas de 90, 60, 30, 15 e 7 dias.
@@ -18,6 +19,14 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Procedimentos:** acesso unificado às esteiras, tarefas, responsáveis e prazos das rotinas administrativas.
 - **Acadêmico:** cursos, aulas, linhas de aprendizagem, atividades, matrículas e progresso.
 - **Gestão:** pessoas, convites, credenciais e auditoria.
+
+## Automações da Fase 4
+
+A rotina é executada a cada hora e também pode ser atualizada manualmente por uma pessoa da equipe. Ela identifica vencimentos e falta de andamento em contratos, documentos, cobranças, recrutamento, desligamentos, férias, afastamentos e atividades acadêmicas. Os alertas são direcionados ao departamento responsável e não são duplicados a cada execução.
+
+O Portal automatiza lembretes, protocolos, registros e tarefas derivadas. Aprovações, decisões financeiras, contratação, desligamento, envio externo e revisão final de documentos continuam dependendo de confirmação humana.
+
+O cadastro Bradesco organiza convênio, carteira, leiaute e etapa da homologação. Ele não emite boleto nem transmite CNAB enquanto a CAFCM não receber do banco a documentação oficial, as credenciais e a confirmação de homologação.
 
 ## Permissões por departamento
 
@@ -87,6 +96,13 @@ No Supabase, em **Authentication > SMTP Settings**:
 
 Nunca salve a API key do Resend, a `service_role` do Supabase, senhas ou tokens neste repositório.
 
+O SMTP acima atende convites, confirmação de conta e recuperação de senha. Para também enviar os e-mails operacionais preparados na Central de Automações, cadastre dois segredos nas Edge Functions do Supabase:
+
+- `RESEND_API_KEY`: a chave de API do Resend.
+- `PORTAL_EMAIL_FROM`: o remetente completo em um domínio verificado, por exemplo `Portal CAFCM <portal@cafcm.org.br>`.
+
+A função `portal-automation` permanece segura sem esses segredos: documentos e alertas funcionam normalmente, e uma tentativa de e-mail retorna uma orientação de configuração sem expor credenciais.
+
 ## Desenvolvimento local
 
 Requer Node.js 22 ou mais recente.
@@ -122,6 +138,8 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 17. `supabase/migrations/20260910171000_phase_two_operations.sql`
 18. `supabase/migrations/20260910173500_phase_two_foreign_key_indexes.sql`
 19. `supabase/migrations/20260910195458_phase_three_administration.sql`
+20. `supabase/migrations/20260911030417_phase_four_automations.sql`
+21. `supabase/migrations/20260911032000_phase_four_hardening.sql`
 
 Os testes transacionais de banco estão em `supabase/tests/` e podem ser executados com `supabase test db` em um ambiente local do Supabase.
 
@@ -131,6 +149,7 @@ Revise os scripts antes de aplicá-los a uma base que já possui dados. A base C
 
 - As tabelas expostas usam Row Level Security (RLS).
 - A função administrativa confirma a sessão e o perfil `cafcm_admin` antes de operações privilegiadas.
+- A função de automações exige JWT válido e permite documentos e e-mails somente à Direção, Departamento Pessoal e Financeiro.
 - A equipe CAFCM recebe permissões por departamento no `app_metadata`, espelhadas no perfil e protegidas por políticas restritivas.
 - Contas de empresa ficam vinculadas à empresa correspondente.
 - Ações relevantes são registradas na auditoria.
