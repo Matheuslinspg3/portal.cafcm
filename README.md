@@ -12,6 +12,10 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Gestão de Vagas:** vagas, capacidade disponível, candidatos, currículos, encaminhamentos e retorno das empresas.
 - **Admissões e Contratos:** conversão do aprovado em jovem, checklist personalizável, vigência e alertas de 90, 60, 30, 15 e 7 dias.
 - **Desligamentos:** acompanhamento por etapas, documentos, contabilidade e encerramento auditável.
+- **Departamento Pessoal:** painel do ciclo do jovem, férias, afastamentos e checklist completo de desligamento.
+- **Financeiro:** controle manual por empresa e competência, com nota fiscal, boleto, vencimento, cobrança e recebimento.
+- **Documentos:** arquivo digital privado, validade, arquivamento e pendências de recebimento e conferência.
+- **Procedimentos:** acesso unificado às esteiras, tarefas, responsáveis e prazos das rotinas administrativas.
 - **Acadêmico:** cursos, aulas, linhas de aprendizagem, atividades, matrículas e progresso.
 - **Gestão:** pessoas, convites, credenciais e auditoria.
 
@@ -117,8 +121,9 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 16. `supabase/migrations/20260910162500_administrative_foreign_key_indexes.sql`
 17. `supabase/migrations/20260910171000_phase_two_operations.sql`
 18. `supabase/migrations/20260910173500_phase_two_foreign_key_indexes.sql`
+19. `supabase/migrations/20260910195458_phase_three_administration.sql`
 
-O teste transacional de banco está em `supabase/tests/phase_two_operations.test.sql` e pode ser executado com `supabase test db` em um ambiente local do Supabase.
+Os testes transacionais de banco estão em `supabase/tests/` e podem ser executados com `supabase test db` em um ambiente local do Supabase.
 
 Revise os scripts antes de aplicá-los a uma base que já possui dados. A base CAFCM atual já recebeu essas evoluções; não execute novamente sem conferir o histórico de migrações.
 
