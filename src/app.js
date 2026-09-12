@@ -49,6 +49,9 @@ const state = {
   financeSearch: "",
   financeStatus: "",
   financeCompany: "",
+  financeTab: "receivable",
+  financeMonth: new Date().toISOString().slice(0, 7),
+  payableStatus: "",
   documentTab: "files",
   documentSearch: "",
   documentCategory: "",
@@ -176,6 +179,14 @@ const financialStatusLabels = {
   cancelled: "Cancelado",
 };
 
+const payableStatusLabels = {
+  pending: "Aguardando aprovação",
+  approved: "Aprovada",
+  scheduled: "Programada",
+  paid: "Paga",
+  cancelled: "Cancelada",
+};
+
 const documentCategoryLabels = {
   admission: "Admissão",
   contract: "Contrato",
@@ -296,6 +307,9 @@ const auditActionLabels = {
   "financial_charges.insert": "Cobrança criada",
   "financial_charges.update": "Cobrança atualizada",
   "financial_charges.delete": "Cobrança excluída",
+  "accounts_payable.insert": "Conta a pagar criada",
+  "accounts_payable.update": "Conta a pagar atualizada",
+  "accounts_payable.delete": "Conta a pagar excluída",
   "document_requirements.insert": "Pendência documental criada",
   "document_requirements.update": "Pendência documental atualizada",
   "document_requirements.delete": "Pendência documental excluída",
@@ -470,10 +484,56 @@ const departmentWizardContent = {
   ],
 };
 
+const wizardActions = {
+  management: [
+    { view: "tasks", dialog: "task", label: "Criar primeira tarefa" },
+    { view: "pipelines", label: "Abrir esteiras" },
+    { view: "companies", dialog: "company", label: "Cadastrar empresa" },
+    { view: "documents", dialog: "document", label: "Enviar documento" },
+    { view: "audit", label: "Abrir auditoria" },
+  ],
+  vacancies: [
+    { view: "vacancies", dialog: "vacancy", label: "Abrir primeira vaga" },
+    { view: "companies", dialog: "company", label: "Cadastrar empresa" },
+    { view: "vacancies", dialog: "application", label: "Iniciar seleção" },
+    { view: "tasks", dialog: "task", label: "Criar tarefa" },
+  ],
+  coordination: [
+    { view: "apprentices", label: "Abrir jovens" },
+    { view: "courses", dialog: "course", label: "Criar primeiro curso" },
+    { view: "enrollments", dialog: "enrollment", label: "Criar matrícula" },
+    { view: "courses", label: "Abrir cursos" },
+  ],
+  personnel: [
+    { view: "admissions", dialog: "admission", label: "Criar admissão" },
+    { view: "contracts", dialog: "contract", label: "Criar contrato" },
+    { view: "leaves", dialog: "leave", label: "Registrar férias ou afastamento" },
+    { view: "terminations", dialog: "termination", label: "Abrir desligamento" },
+    { view: "accounting", dialog: "accounting", label: "Criar envio contábil" },
+  ],
+  hr: [
+    { view: "vacancies", dialog: "candidate", label: "Cadastrar candidato" },
+    { view: "people", dialog: "invite", label: "Enviar convite" },
+    { view: "people", label: "Abrir pessoas e convites" },
+    { view: "audit", label: "Abrir auditoria" },
+  ],
+  finance: [
+    { view: "finance", dialog: "financial-charge", label: "Criar primeira cobrança" },
+    { view: "finance", dialog: "payable", label: "Criar conta a pagar" },
+    { view: "documents", dialog: "document", label: "Enviar documento financeiro" },
+    { view: "accounting", dialog: "accounting", label: "Criar envio contábil" },
+  ],
+};
+
 function wizardSteps(profile = state.profile) {
   return profile?.role === "cafcm_admin"
     ? departmentWizardContent[profileDepartment(profile)] || wizardContent.cafcm_admin
     : wizardContent[profile?.role] || [];
+}
+
+function wizardAction(profile = state.profile, index = state.wizardStep) {
+  if (profile?.role !== "cafcm_admin") return null;
+  return (wizardActions[profileDepartment(profile)] || wizardActions.management)[index] || null;
 }
 
 const icons = {
@@ -1848,34 +1908,79 @@ async function renderPersonnel(content) {
     <section class="card"><div class="card-head"><div><span class="eyebrow">Exige atenção</span><h2>Pendências administrativas</h2></div><button class="text-link" data-nav="procedures">Ver procedimentos</button></div>${attention.length ? `<div class="people-list">${attention.map(([title, detail, view]) => operationalRow(title, detail, "Pendente", `<button class="btn btn-small btn-secondary" data-nav="${view}">Abrir</button>`)).join("")}</div>` : emptyState("Rotina administrativa em dia", "Não há pendências registradas neste momento.")}</section>`;
 }
 
+function financeDateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function shiftFinanceMonth(monthValue, offset) {
+  const [year, month] = String(monthValue || "").split("-").map(Number);
+  return financeDateKey(new Date((Number.isFinite(year) ? year : new Date().getFullYear()), (Number.isFinite(month) ? month - 1 : new Date().getMonth()) + offset, 1)).slice(0, 7);
+}
+
+function financeCalendar(monthValue, charges, payables, canManage) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const first = new Date(year, month - 1, 1);
+  const start = new Date(year, month - 1, 1 - first.getDay());
+  const eventMap = new Map();
+  const addEvent = (date, item) => {
+    if (!date) return;
+    const list = eventMap.get(date) || [];
+    list.push(item);
+    eventMap.set(date, list);
+  };
+  charges.forEach((item) => addEvent(item.due_date, { type: "receive", id: item.id, label: item.description, value: item.amount, status: item.status }));
+  payables.forEach((item) => addEvent(item.due_date, { type: "pay", id: item.id, label: item.supplier_name, value: item.amount, status: item.status }));
+  const weekdays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const days = Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+  return `<section class="card finance-calendar"><div class="card-head"><div><span class="eyebrow">Agenda financeira</span><h2>${new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(first)}</h2></div><div class="calendar-controls"><button class="btn btn-small btn-quiet" data-finance-month-shift="-1" aria-label="Mês anterior">‹</button><button class="btn btn-small btn-quiet" data-finance-month-today>Hoje</button><button class="btn btn-small btn-quiet" data-finance-month-shift="1" aria-label="Próximo mês">›</button></div></div><p class="muted-note"><span class="calendar-key receive"></span> A receber <span class="calendar-key pay"></span> A pagar</p><div class="calendar-weekdays">${weekdays.map((day) => `<span>${day}</span>`).join("")}</div><div class="calendar-days">${days.map((date) => {
+    const key = financeDateKey(date);
+    const events = eventMap.get(key) || [];
+    const inMonth = date.getMonth() === first.getMonth();
+    const isToday = key === financeDateKey(new Date());
+    return `<div class="calendar-day ${inMonth ? "" : "outside"} ${isToday ? "today" : ""}"><b>${date.getDate()}</b><div>${events.slice(0, 3).map((event) => `<button class="calendar-event ${event.type}" ${canManage ? `data-edit-${event.type === "pay" ? "payable" : "financial-charge"}="${event.id}"` : "disabled"} title="${escapeHtml(event.label)} · ${formatMoney(event.value)}">${escapeHtml(event.label)}</button>`).join("")}${events.length > 3 ? `<small>+${events.length - 3} lançamento(s)</small>` : ""}</div></div>`;
+  }).join("")}</div></section>`;
+}
+
 async function renderFinance(content) {
-  const [chargesResult, references] = await Promise.all([
+  const [chargesResult, payablesResult, references] = await Promise.all([
     supabase.from("financial_charges").select("*").order("competence", { ascending: false }).order("due_date", { ascending: true, nullsFirst: false }),
+    supabase.from("accounts_payable").select("*").order("due_date", { ascending: true }),
     loadOperationalReferences(),
   ]);
-  if (chargesResult.error) throw chargesResult.error;
+  if (chargesResult.error || payablesResult.error) throw chargesResult.error || payablesResult.error;
   const charges = chargesResult.data || [];
+  const payables = payablesResult.data || [];
   const canManage = hasPermission("finance.manage");
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
   const search = state.financeSearch.trim().toLocaleLowerCase("pt-BR");
-  const filtered = charges.filter((item) => {
+  const filteredCharges = charges.filter((item) => {
     const companyName = companyMap.get(item.company_id) || "";
     const haystack = [item.description, item.invoice_number, item.payment_slip_number, companyName].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
     return (!search || haystack.includes(search)) && (!state.financeStatus || item.status === state.financeStatus) && (!state.financeCompany || item.company_id === state.financeCompany);
   });
-  const open = charges.filter((item) => !["paid", "cancelled"].includes(item.status));
-  const overdue = charges.filter((item) => item.status === "overdue" || (!["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date()));
+  const filteredPayables = payables.filter((item) => {
+    const haystack = [item.supplier_name, item.supplier_document, item.category, item.description, item.external_reference, item.barcode].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
+    return (!search || haystack.includes(search)) && (!state.payableStatus || item.status === state.payableStatus);
+  });
+  const openCharges = charges.filter((item) => !["paid", "cancelled"].includes(item.status));
+  const overdueCharges = charges.filter((item) => item.status === "overdue" || (!["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date()));
   const received = charges.filter((item) => item.status === "paid");
-  const hasFilters = Boolean(state.financeSearch || state.financeStatus || state.financeCompany);
-  content.innerHTML = `${pageHead("Financeiro", "Controle manual de cobranças, notas fiscais, boletos, vencimentos e recebimentos por empresa.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">${icon("plus")} Nova cobrança</button>` : "")}
-    <section class="metric-grid">${metric("A receber", formatMoney(open.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overdue.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Recebido", formatMoney(received.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Cobranças", charges.length, "history")}</section>
-    <section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar empresa, cobrança, NF ou boleto" aria-label="Buscar cobranças" /></label><select data-finance-filter="status" aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(financialStatusLabels, state.financeStatus)}</select><select data-finance-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.financeCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${hasFilters ? `<button class="btn btn-small btn-quiet" data-clear-finance-filters>Limpar filtros</button>` : ""}</section>
-    <section class="card"><div class="people-list finance-list">${filtered.length ? filtered.map((item) => {
-      const isLate = !["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date();
-      const detail = `${formatMonth(item.competence)} · vence ${item.due_date ? formatDate(item.due_date) : "sem data"}${item.invoice_number ? ` · NF ${item.invoice_number}` : ""}${item.payment_slip_number ? ` · boleto ${item.payment_slip_number}` : ""}`;
-      const status = isLate ? "Vencido — atualizar" : financialStatusLabels[item.status] || item.status;
-      return `<article class="person-row finance-row"><span class="avatar">${icon(isLate ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · ${escapeHtml(detail)}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-financial-charge="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`;
-    }).join("") : emptyState("Nenhuma cobrança encontrada", hasFilters ? "Altere os filtros para localizar outro registro." : "Cadastre a primeira cobrança para iniciar o controle financeiro.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">Nova cobrança</button>` : "")}</div></section>`;
+  const openPayables = payables.filter((item) => !["paid", "cancelled"].includes(item.status));
+  const overduePayables = openPayables.filter((item) => item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date());
+  const paidPayables = payables.filter((item) => item.status === "paid");
+  const hasChargeFilters = Boolean(state.financeSearch || state.financeStatus || state.financeCompany);
+  const tabs = [["receivable", "Contas a receber", charges.length], ["payable", "Contas a pagar", payables.length], ["calendar", "Calendário", ""]];
+  if (!tabs.some(([key]) => key === state.financeTab)) state.financeTab = "receivable";
+  const action = !canManage ? "" : state.financeTab === "payable" ? `<button class="btn btn-primary" data-dialog="payable">${icon("plus")} Nova conta a pagar</button>` : `<button class="btn btn-primary" data-dialog="financial-charge">${icon("plus")} Nova cobrança</button>`;
+  let body = "";
+  if (state.financeTab === "receivable") {
+    body = `<section class="metric-grid">${metric("A receber", formatMoney(openCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overdueCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Recebido", formatMoney(received.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Cobranças", charges.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar empresa, cobrança, NF ou boleto" aria-label="Buscar cobranças" /></label><select data-finance-filter="status" aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(financialStatusLabels, state.financeStatus)}</select><select data-finance-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.financeCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${hasChargeFilters ? `<button class="btn btn-small btn-quiet" data-clear-finance-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredCharges.length ? filteredCharges.map((item) => { const isLate = !["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${formatMonth(item.competence)} · vence ${item.due_date ? formatDate(item.due_date) : "sem data"}${item.invoice_number ? ` · NF ${item.invoice_number}` : ""}${item.payment_slip_number ? ` · boleto ${item.payment_slip_number}` : ""}`; const status = isLate ? "Vencido — atualizar" : financialStatusLabels[item.status] || item.status; return `<article class="person-row finance-row"><span class="avatar">${icon(isLate ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · ${escapeHtml(detail)}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-financial-charge="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma cobrança encontrada", hasChargeFilters ? "Altere os filtros para localizar outro registro." : "Cadastre a primeira cobrança para iniciar o controle financeiro.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">Nova cobrança</button>` : "")}</div></section>`;
+  } else if (state.financeTab === "payable") {
+    body = `<section class="metric-grid">${metric("A pagar", formatMoney(openPayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overduePayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Pago", formatMoney(paidPayables.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Contas", payables.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar fornecedor, despesa ou referência" aria-label="Buscar contas a pagar" /></label><select data-payable-filter aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(payableStatusLabels, state.payableStatus)}</select>${state.financeSearch || state.payableStatus ? `<button class="btn btn-small btn-quiet" data-clear-payable-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredPayables.length ? filteredPayables.map((item) => { const late = !["paid", "cancelled"].includes(item.status) && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${escapeHtml(item.category)} · vence ${formatDate(item.due_date)}${item.planned_payment_date ? ` · previsto para ${formatDate(item.planned_payment_date)}` : ""}${item.payment_method === "bradesco" ? " · Bradesco (manual)" : ""}`; return `<article class="person-row finance-row"><span class="avatar">${icon(late ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(item.supplier_name)}</strong><small>${escapeHtml(item.description)} · ${detail}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(late ? "Vencida — atualizar" : payableStatusLabels[item.status] || item.status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-payable="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma conta a pagar encontrada", "Cadastre fornecedores, despesas, vencimentos e responsáveis para manter os avisos centralizados.", canManage ? `<button class="btn btn-primary" data-dialog="payable">Nova conta a pagar</button>` : "")}</div></section>`;
+  } else {
+    body = financeCalendar(state.financeMonth, charges, payables, canManage);
+  }
+  content.innerHTML = `${pageHead("Financeiro", "Controle manual de cobranças, contas a pagar, calendário e lembretes de vencimento em uma única rotina.", action)}<nav class="operations-tabs" aria-label="Áreas do financeiro">${tabs.map(([key, label, count]) => `<button class="${state.financeTab === key ? "active" : ""}" data-finance-tab="${key}">${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>${body}`;
 }
 
 async function renderDocuments(content) {
@@ -2508,6 +2613,7 @@ function renderWizard() {
   const steps = wizardSteps(state.profile);
   const index = Math.min(state.wizardStep, steps.length - 1);
   const [title, text] = steps[index];
+  const action = wizardAction(state.profile, index);
   root.innerHTML = `
     <div class="dialog-backdrop">
       <section class="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
@@ -2518,6 +2624,7 @@ function renderWizard() {
           <p class="eyebrow">Passo ${index + 1} de ${steps.length}</p>
           <h2 id="wizard-title">${title}</h2>
           <p>${text}</p>
+          ${action ? `<button class="btn btn-secondary wizard-create-action" data-wizard-create data-wizard-view="${action.view}" ${action.dialog ? `data-wizard-dialog="${action.dialog}"` : ""}>${icon("plus")} ${action.label}</button>` : ""}
           <div class="wizard-actions">
             <button class="btn btn-quiet" data-wizard-back ${index === 0 ? "disabled" : ""}>Voltar</button>
             ${index === steps.length - 1
@@ -2863,7 +2970,7 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
-  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge"].includes(type)) {
+  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge", "payable"].includes(type)) {
     const references = await loadOperationalReferences();
     const apprenticeOptions = references.apprentices.map((person) => `<option value="${person.id}">${escapeHtml(person.full_name)}</option>`).join("");
     const companyOptions = references.companies.map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("");
@@ -2930,6 +3037,13 @@ async function openDialog(type, recordId = null) {
       const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
       const documentOptions = (selected, category) => `<option value="">Sem arquivo vinculado</option>${(documents || []).filter((document) => document.category === category || document.category === "finance").map((document) => `<option value="${document.id}" ${selected === document.id ? "selected" : ""}>${escapeHtml(document.title)}</option>`).join("")}`;
       body = `<form id="financial-charge-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Competência<input name="competence" type="month" required value="${escapeHtml(item.competence ? String(item.competence).slice(0, 7) : "")}" /></label><label>Descrição<input name="description" required maxlength="240" value="${escapeHtml(item.description || "")}" placeholder="Ex.: Mensalidade de aprendizagem" /></label><label>Valor<input name="amount" type="number" min="0" step="0.01" required value="${escapeHtml(item.amount ?? "")}" /></label><label>Vencimento<input name="dueDate" type="date" value="${escapeHtml(item.due_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(financialStatusLabels, item.status || "to_invoice")}</select></label><label>Contrato relacionado<select name="contractId"><option value="">Sem contrato vinculado</option>${(contracts || []).map((contract) => `<option value="${contract.id}" ${item.contract_id === contract.id ? "selected" : ""}>${escapeHtml(companyMap.get(contract.company_id) || "Empresa")} · ${escapeHtml(profileMap.get(contract.apprentice_id) || "Jovem")} · ${formatDate(contract.start_date)} a ${formatDate(contract.end_date)}</option>`).join("")}</select></label><label>Responsável<select name="responsibleId"><option value="">Sem responsável</option>${references.administrators.map((person) => `<option value="${person.id}" ${item.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label></div><div class="form-section"><span>Nota fiscal e boleto</span></div><div class="form-grid two-columns"><label>Número da NF<input name="invoiceNumber" maxlength="120" value="${escapeHtml(item.invoice_number || "")}" /></label><label>Data de emissão da NF<input name="invoiceIssuedAt" type="datetime-local" value="${formatDateTimeInput(item.invoice_issued_at)}" /></label><label>Número do boleto<input name="paymentSlipNumber" maxlength="160" value="${escapeHtml(item.payment_slip_number || "")}" /></label><label>Data de emissão do boleto<input name="paymentSlipIssuedAt" type="datetime-local" value="${formatDateTimeInput(item.payment_slip_issued_at)}" /></label><label>Linha digitável<input name="paymentSlipLine" maxlength="240" value="${escapeHtml(item.payment_slip_line || "")}" /></label><label>Link do boleto<input name="paymentSlipUrl" type="url" maxlength="2048" value="${escapeHtml(item.payment_slip_url || "")}" /></label><label>Arquivo da NF<select name="invoiceDocumentId">${documentOptions(item.invoice_document_id, "invoice")}</select></label><label>Arquivo do boleto<select name="paymentSlipDocumentId">${documentOptions(item.payment_slip_document_id, "payment_slip")}</select></label></div><div class="form-section"><span>Recebimento</span></div><div class="form-grid two-columns"><label>Data do pagamento<input name="paidAt" type="datetime-local" value="${formatDateTimeInput(item.paid_at)}" /></label><label>Valor recebido<input name="paidAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.paid_amount ?? "")}" /></label><label>Comprovante<select name="receiptDocumentId">${documentOptions(item.receipt_document_id, "receipt")}</select></label></div><label>Observações<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><p class="form-note">Nesta etapa, NF, boleto, envio, vencimento e pagamento são atualizados manualmente pelo Financeiro.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar cobrança" : "Criar cobrança"}</button></form>`;
+    }
+    if (type === "payable") {
+      const item = await selectRecord("accounts_payable");
+      const { data: documents, error: documentsError } = await supabase.from("document_records").select("id,title,category").eq("is_archived", false).in("category", ["finance", "invoice", "payment_slip", "receipt", "other"]).order("created_at", { ascending: false }).limit(250);
+      if (documentsError) throw documentsError;
+      const documentOptions = (selected) => `<option value="">Sem arquivo vinculado</option>${(documents || []).map((document) => `<option value="${document.id}" ${selected === document.id ? "selected" : ""}>${escapeHtml(document.title)}</option>`).join("")}`;
+      body = `<form id="payable-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Fornecedor ou favorecido<input name="supplierName" required maxlength="200" value="${escapeHtml(item.supplier_name || "")}" placeholder="Ex.: Companhia de energia" /></label><label>CPF ou CNPJ<input name="supplierDocument" maxlength="32" value="${escapeHtml(item.supplier_document || "")}" /></label><label>Categoria<input name="category" required maxlength="80" value="${escapeHtml(item.category || "")}" placeholder="Ex.: Energia, imposto, fornecedor" /></label><label>Competência<input name="competence" type="month" value="${escapeHtml(item.competence ? String(item.competence).slice(0, 7) : "")}" /></label><label>Descrição<input name="description" required maxlength="240" value="${escapeHtml(item.description || "")}" placeholder="Ex.: Fatura mensal" /></label><label>Valor<input name="amount" type="number" min="0.01" step="0.01" required value="${escapeHtml(item.amount ?? "")}" /></label><label>Vencimento<input name="dueDate" type="date" required value="${escapeHtml(item.due_date || "")}" /></label><label>Pagamento previsto<input name="plannedPaymentDate" type="date" value="${escapeHtml(item.planned_payment_date || "")}" /></label><label>Situação<select name="status">${selectOptions(payableStatusLabels, item.status || "pending")}</select></label><label>Forma de controle<select name="paymentMethod"><option value="manual" ${item.payment_method !== "bradesco" ? "selected" : ""}>Manual</option><option value="bradesco" ${item.payment_method === "bradesco" ? "selected" : ""}>Bradesco (ainda sem envio automático)</option></select></label><label>Responsável<select name="responsibleId"><option value="">Sem responsável</option>${references.administrators.map((person) => `<option value="${person.id}" ${item.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Lembretes antes do vencimento<input name="reminderDays" inputmode="numeric" maxlength="20" value="${escapeHtml((item.reminder_days || [7, 3, 1]).join(", "))}" placeholder="Ex.: 7, 3, 1" /><small>Em dias; máximo de cinco valores.</small></label></div><div class="form-section"><span>Documento e pagamento</span></div><div class="form-grid two-columns"><label>Código de barras<input name="barcode" maxlength="260" value="${escapeHtml(item.barcode || "")}" /></label><label>Referência externa<input name="externalReference" maxlength="160" value="${escapeHtml(item.external_reference || "")}" placeholder="Número da fatura ou protocolo" /></label><label>Documento da despesa<select name="documentId">${documentOptions(item.document_id)}</select></label><label>Comprovante<select name="receiptDocumentId">${documentOptions(item.receipt_document_id)}</select></label><label>Data do pagamento<input name="paidAt" type="datetime-local" value="${formatDateTimeInput(item.paid_at)}" /></label><label>Valor pago<input name="paidAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.paid_amount ?? "")}" /></label></div><label>Observações<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><p class="form-note">O Portal organiza a conta, calendário e lembretes. Nenhum pagamento é enviado ao banco nesta etapa.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar conta a pagar" : "Criar conta a pagar"}</button></form>`;
     }
   }
 
@@ -3059,6 +3173,7 @@ async function openDialog(type, recordId = null) {
     "document-edit": "Alterar documento",
     "document-requirement": recordId ? "Alterar pendência documental" : "Nova pendência documental",
     "financial-charge": recordId ? "Alterar cobrança" : "Nova cobrança",
+    payable: recordId ? "Alterar conta a pagar" : "Nova conta a pagar",
     "email-draft": recordId ? "Conferir e-mail" : "Preparar e-mail",
     "document-generation": "Gerar documento",
     "banking-integration": recordId ? "Alterar preparação Bradesco" : "Preparar integração Bradesco",
@@ -3075,7 +3190,7 @@ async function openDialog(type, recordId = null) {
     enrollment: "Nova matrícula",
     response: "Responder atividade",
   };
-  const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "leave", "termination", "accounting", "document", "document-requirement", "financial-charge", "email-draft", "document-generation", "banking-integration", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
+  const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "leave", "termination", "accounting", "document", "document-requirement", "financial-charge", "payable", "email-draft", "document-generation", "banking-integration", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
   root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>${body}</section></div>`;
 }
 
@@ -3313,6 +3428,18 @@ app.addEventListener("click", async (event) => {
     state.automationTab = target.dataset.automationTab;
     return renderView();
   }
+  if (target.dataset.financeTab) {
+    state.financeTab = target.dataset.financeTab;
+    return renderView();
+  }
+  if (target.dataset.financeMonthShift) {
+    state.financeMonth = shiftFinanceMonth(state.financeMonth, Number(target.dataset.financeMonthShift));
+    return renderView();
+  }
+  if (target.hasAttribute("data-finance-month-today")) {
+    state.financeMonth = new Date().toISOString().slice(0, 7);
+    return renderView();
+  }
   if (target.hasAttribute("data-export-indicators")) {
     try {
       const { data, error } = await supabase.rpc("get_portal_indicators", { period_start_value: state.indicatorStart, period_end_value: state.indicatorEnd });
@@ -3345,6 +3472,7 @@ app.addEventListener("click", async (event) => {
     showToast("Meta removida.");
     return renderView();
   }
+  if (target.dataset.editPayable) return openDialog("payable", target.dataset.editPayable);
   if (target.dataset.openProcedurePipeline) {
     state.selectedPipelineId = target.dataset.openProcedurePipeline;
     return navigate("pipelines");
@@ -3374,6 +3502,15 @@ app.addEventListener("click", async (event) => {
   if (target.hasAttribute("data-wizard-back")) {
     state.wizardStep = Math.max(0, state.wizardStep - 1);
     return renderWizard();
+  }
+  if (target.hasAttribute("data-wizard-create")) {
+    const view = target.dataset.wizardView;
+    const dialog = target.dataset.wizardDialog;
+    state.wizardOpen = false;
+    closeOverlay();
+    await navigate(view);
+    if (dialog) return openDialog(dialog);
+    return;
   }
   if (target.hasAttribute("data-wizard-finish")) {
     const { error } = await supabase.from("profiles").update({ onboarding_completed: true }).eq("id", state.profile.id);
@@ -3406,6 +3543,11 @@ app.addEventListener("click", async (event) => {
     state.financeSearch = "";
     state.financeStatus = "";
     state.financeCompany = "";
+    return renderView();
+  }
+  if (target.hasAttribute("data-clear-payable-filters")) {
+    state.financeSearch = "";
+    state.payableStatus = "";
     return renderView();
   }
   if (target.hasAttribute("data-clear-document-filters")) {
@@ -3855,6 +3997,11 @@ app.addEventListener("change", (event) => {
   if (event.target.matches("[data-finance-filter]")) {
     const stateKey = event.target.dataset.financeFilter === "status" ? "financeStatus" : "financeCompany";
     state[stateKey] = event.target.value;
+    return renderView();
+  }
+
+  if (event.target.matches("[data-payable-filter]")) {
+    state.payableStatus = event.target.value;
     return renderView();
   }
 
@@ -4469,6 +4616,46 @@ app.addEventListener("submit", async (event) => {
       const { error } = values.id ? await supabase.from("financial_charges").update(payload).eq("id", values.id) : await supabase.from("financial_charges").insert({ ...payload, created_by: state.profile.id });
       if (error) throw error;
       closeOverlay(); showToast(values.id ? "Cobrança atualizada." : "Cobrança criada."); return renderView();
+    }
+
+    if (form.id === "payable-form") {
+      const reminderDays = String(values.reminderDays || "")
+        .split(",")
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isInteger(value));
+      const uniqueReminderDays = [...new Set(reminderDays)].sort((first, second) => second - first);
+      if (!uniqueReminderDays.length || uniqueReminderDays.length > 5 || uniqueReminderDays.some((value) => value < 0 || value > 60)) {
+        throw new Error("Informe de um a cinco lembretes entre 0 e 60 dias, separados por vírgula.");
+      }
+      const payload = {
+        supplier_name: String(values.supplierName || "").trim(),
+        supplier_document: valueOrNull(values.supplierDocument),
+        category: String(values.category || "").trim(),
+        description: String(values.description || "").trim(),
+        competence: values.competence ? `${values.competence}-01` : null,
+        amount: Number(values.amount),
+        due_date: values.dueDate,
+        planned_payment_date: values.plannedPaymentDate || null,
+        status: values.status || "pending",
+        payment_method: values.paymentMethod === "bradesco" ? "bradesco" : "manual",
+        barcode: valueOrNull(values.barcode),
+        external_reference: valueOrNull(values.externalReference),
+        document_id: values.documentId || null,
+        receipt_document_id: values.receiptDocumentId || null,
+        responsible_id: values.responsibleId || null,
+        paid_at: values.paidAt ? new Date(values.paidAt).toISOString() : null,
+        paid_amount: valueOrNull(values.paidAmount),
+        reminder_days: uniqueReminderDays,
+        notes: String(values.notes || "").trim(),
+      };
+      if (!payload.supplier_name || !payload.category || !payload.description || !payload.due_date || !Number.isFinite(payload.amount) || payload.amount <= 0) {
+        throw new Error("Preencha fornecedor, categoria, descrição, valor e vencimento.");
+      }
+      const { error } = values.id
+        ? await supabase.from("accounts_payable").update(payload).eq("id", values.id)
+        : await supabase.from("accounts_payable").insert({ ...payload, created_by: state.profile.id });
+      if (error) throw error;
+      closeOverlay(); showToast(values.id ? "Conta a pagar atualizada." : "Conta a pagar criada. Os lembretes serão incluídos na rotina automática."); return renderView();
     }
 
     if (form.id === "document-form") {
