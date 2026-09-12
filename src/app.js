@@ -53,6 +53,9 @@ const state = {
   documentSearch: "",
   documentCategory: "",
   automationTab: "overview",
+  indicatorStart: "",
+  indicatorEnd: "",
+  indicatorGroup: "all",
 };
 
 const roleLabels = {
@@ -72,11 +75,11 @@ const departmentLabels = {
 
 const departmentPermissions = {
   management: ["*"],
-  vacancies: ["directory.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage"],
-  coordination: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "academic.read", "academic.manage"],
-  personnel: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "personnel.read", "personnel.manage", "contracts.read", "contracts.manage", "documents.read", "documents.manage", "finance.read", "finance.manage"],
-  hr: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "people.read", "people.manage", "audit.read"],
-  finance: ["directory.read", "operations.read", "operations.manage", "companies.read", "contracts.read", "documents.read", "documents.manage", "finance.read", "finance.manage"],
+  vacancies: ["directory.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "reports.read", "reports.export"],
+  coordination: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "academic.read", "academic.manage", "reports.read", "reports.export"],
+  personnel: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "personnel.read", "personnel.manage", "contracts.read", "contracts.manage", "documents.read", "documents.manage", "finance.read", "finance.manage", "reports.read", "reports.export"],
+  hr: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "people.read", "people.manage", "audit.read", "reports.read", "reports.export"],
+  finance: ["directory.read", "operations.read", "operations.manage", "companies.read", "contracts.read", "documents.read", "documents.manage", "finance.read", "finance.manage", "reports.read", "reports.export"],
 };
 
 const candidateStatusLabels = {
@@ -222,6 +225,7 @@ const viewPermissions = {
   procedures: "operations.read",
   people: "people.read",
   audit: "audit.read",
+  indicators: "reports.read",
 };
 
 function profileDepartment(profile = state.profile) {
@@ -343,7 +347,7 @@ const auditActionLabels = {
 
 const navigation = {
   cafcm_admin: [
-    { label: "Painel", items: [["overview", "Visão geral", "grid"]] },
+    { label: "Painel", items: [["overview", "Visão geral", "grid"], ["indicators", "Indicadores e relatórios", "history"]] },
     { label: "Operações", items: [
       ["pipelines", "Central de Esteiras", "kanban"],
       ["tasks", "Tarefas e Pendências", "tasks"],
@@ -684,6 +688,7 @@ function viewTitle(view) {
     "lesson-editor": ["Estrutura da aula", "Linhas de aprendizagem"],
     enrollments: ["Matrículas", "Vínculos entre jovens e cursos"],
     audit: ["Auditoria", "Histórico das ações no portal"],
+    indicators: ["Indicadores e relatórios", "Dados reais para apoiar a gestão"],
     "student-home": ["Início", "Sua formação no Portal CAFCM"],
     "student-courses": ["Meus cursos", "Conteúdos liberados pela CAFCM"],
     "student-activities": ["Atividades", "Acompanhe seus envios"],
@@ -1028,6 +1033,7 @@ async function renderView() {
       "lesson-editor": renderLessonEditor,
       enrollments: renderEnrollments,
       audit: renderAudit,
+      indicators: renderIndicators,
       "student-home": renderStudentHome,
       "student-courses": renderStudentCourses,
       "student-activities": renderStudentActivities,
@@ -1452,6 +1458,75 @@ async function renderAutomations(content) {
     body = `<section class="card"><div class="people-list">${runs.length ? runs.map((item) => operationalRow(item.run_source === "manual" ? "Atualização solicitada pela equipe" : item.run_source === "schedule" ? "Atualização agendada" : "Atualização do sistema", `${formatDate(item.started_at, true)} · ${item.alerts_active} alertas · ${item.notifications_open} notificações · ${item.tasks_open} tarefas${item.error_message ? ` · ${item.error_message}` : ""}`, labels[item.status] || item.status)).join("") : emptyState("Nenhuma execução registrada", "O histórico será formado nas próximas atualizações.")}</div></section>`;
   }
   content.innerHTML = `${pageHead("Automações", "Reduza controles repetitivos sem retirar da equipe as decisões importantes.", actions)}<nav class="operations-tabs" aria-label="Áreas de automação">${tabs.map(([value, label, count]) => `<button class="${state.automationTab === value ? "active" : ""}" data-automation-tab="${value}">${label}<span>${count}</span></button>`).join("")}</nav>${body}`;
+}
+
+function indicatorValue(metric) {
+  const value = Number(metric?.value || 0);
+  if (metric?.format === "currency") return formatMoney(value);
+  if (metric?.format === "percent") return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value)}%`;
+  if (metric?.format === "hours") return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value)} h`;
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value);
+}
+
+function indicatorGroups(metrics) {
+  return [...new Set((metrics || []).map((item) => item.group).filter(Boolean))];
+}
+
+function indicatorGroupLabel(group) {
+  return ({ operations: "Operações", companies: "Empresas", apprentices: "Jovens", vacancies: "Vagas", personnel: "Departamento Pessoal", contracts: "Contratos", academic: "Acadêmico", finance: "Financeiro" })[group] || group;
+}
+
+function indicatorTargetStatus(metric, target) {
+  if (!target) return "";
+  const value = Number(metric.value || 0);
+  const goal = Number(target.target_value || 0);
+  const reached = target.comparison === "maximum" ? value <= goal : value >= goal;
+  return `<small class="indicator-goal ${reached ? "reached" : "pending"}">${reached ? "Meta dentro do esperado" : "Meta a acompanhar"} · ${target.comparison === "maximum" ? "até" : "mínimo"} ${indicatorValue({ value: goal, format: metric.format })}</small>`;
+}
+
+function csvForIndicators(report) {
+  const rows = [["grupo", "indicador", "valor", "formato", "período_início", "período_fim"]];
+  for (const metric of report.metrics || []) rows.push([indicatorGroupLabel(metric.group), metric.label, metric.value, metric.format, report.period?.start || "", report.period?.end || ""]);
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(";")).join("\n")}\n`;
+}
+
+async function renderIndicators(content) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!state.indicatorEnd) state.indicatorEnd = today;
+  if (!state.indicatorStart) {
+    const start = new Date();
+    start.setDate(start.getDate() - 29);
+    state.indicatorStart = start.toISOString().slice(0, 10);
+  }
+  const [{ data: report, error }, { data: logs, error: logsError }, { data: tasks, error: tasksError }, { data: processes, error: processesError }] = await Promise.all([
+    supabase.rpc("get_portal_indicators", { period_start_value: state.indicatorStart, period_end_value: state.indicatorEnd }),
+    supabase.from("work_activity_logs").select("*").order("started_at", { ascending: false }).limit(20),
+    supabase.from("tasks").select("id,title").not("status", "in", "(completed,cancelled)").order("due_at", { ascending: true, nullsFirst: false }).limit(100),
+    supabase.from("pipeline_items").select("id,title").eq("is_archived", false).is("closed_at", null).order("last_moved_at", { ascending: false }).limit(100),
+  ]);
+  if (error || logsError || tasksError || processesError) throw error || logsError || tasksError || processesError;
+  const metrics = (report?.metrics || []).filter((item) => state.indicatorGroup === "all" || item.group === state.indicatorGroup);
+  const targetMap = new Map((report?.targets || []).map((target) => [target.metric_key, target]));
+  const groups = indicatorGroups(report?.metrics);
+  const bottlenecks = report?.bottlenecks || [];
+  const stages = (report?.stages || []).filter((stage) => Number(stage.count) > 0 || Number(stage.average_days) > 0);
+  const productivity = report?.productivity || {};
+  const canManageTargets = profileDepartment() === "management";
+  const activeLog = (logs || []).find((log) => log.status === "running");
+  const canExport = hasPermission("reports.export");
+  content.innerHTML = `
+    ${pageHead("Indicadores e relatórios", report?.visibility === "institution" ? "Visão institucional com dados reais. Metas são definidas apenas pela Direção." : "Visão do seu departamento e do seu próprio registro de trabalho.", canExport ? `<button class="btn btn-secondary" data-export-indicators>${icon("download")} Exportar CSV</button>` : "")}
+    <section class="card indicator-filter-card"><form id="indicator-filter-form" class="indicator-filter"><label>Início<input type="date" name="start" value="${state.indicatorStart}" max="${today}" required /></label><label>Fim<input type="date" name="end" value="${state.indicatorEnd}" max="${today}" required /></label><label>Área<select name="group"><option value="all">Todas as áreas permitidas</option>${groups.map((group) => `<option value="${group}" ${state.indicatorGroup === group ? "selected" : ""}>${indicatorGroupLabel(group)}</option>`).join("")}</select></label><button class="btn btn-primary" type="submit">Atualizar relatório</button></form></section>
+    <section class="metric-grid indicator-metrics">${metrics.map((item) => `<button class="metric indicator-metric" data-nav="${item.destination}" ${canAccessView(item.destination) ? "" : "disabled"}><span class="metric-icon">${icon(item.group === "finance" ? "calendar" : item.group === "academic" ? "book" : item.group === "operations" ? "kanban" : "grid")}</span><span><small>${escapeHtml(item.label)}</small><strong>${indicatorValue(item)}</strong>${indicatorTargetStatus(item, targetMap.get(item.key))}</span></button>`).join("") || emptyState("Sem indicadores nesta área", "O seu departamento não possui indicadores liberados para este recorte.")}</section>
+    <section class="indicator-layout">
+      <article class="card"><div class="card-head"><div><span class="eyebrow">Precisa da sua atenção</span><h2>${bottlenecks.length ? "Gargalos e pendências" : "Nenhum gargalo identificado"}</h2></div></div>${bottlenecks.length ? `<div class="indicator-list">${bottlenecks.map((item) => `<button data-nav="${item.destination}"><span class="indicator-severity ${escapeHtml(item.severity)}">${item.severity === "urgent" ? icon("alert") : icon("clock")}</span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}${item.due_on ? ` · referência ${formatDate(item.due_on)}` : ""}</small></span></button>`).join("")}</div>` : `<p class="muted-note">Os alertas ativos aparecerão aqui quando houver algo que exija providência.</p>`}</article>
+      <article class="card"><div class="card-head"><div><span class="eyebrow">Carga operacional</span><h2>${report?.visibility === "institution" ? "Visão institucional" : "Meu registro"}</h2></div></div><div class="work-summary"><span><strong>${productivity.recorded_minutes || 0}</strong><small>minutos no período</small></span><span><strong>${productivity.completed_entries || 0}</strong><small>registros concluídos</small></span><span><strong>${productivity.open_entries || 0}</strong><small>em andamento</small></span></div><p class="muted-note">O registro serve para organizar a carga e melhorar processos. Não há pontuação, ranking ou vigilância individual.</p></article>
+    </section>
+    <section class="card"><div class="card-head"><div><span class="eyebrow">Tempo nas etapas</span><h2>Distribuição das esteiras</h2></div></div>${stages.length ? `<div class="stage-report-list">${stages.map((stage) => `<div><span><strong>${escapeHtml(stage.pipeline)}</strong><small>${escapeHtml(stage.stage)}</small></span><b>${stage.count} processo(s)</b><em>${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(Number(stage.average_days || 0))} dias em média</em></div>`).join("")}</div>` : `<p class="muted-note">Quando houver processos em andamento, o tempo médio de cada etapa será mostrado aqui.</p>`}</section>
+    <section class="indicator-layout">
+      <article class="card"><div class="card-head"><div><span class="eyebrow">Registro de trabalho</span><h2>Tempo vinculado a tarefas e processos</h2></div></div>${activeLog ? `<div class="active-work-log"><strong>${escapeHtml(activeLog.title)}</strong><small>Em andamento desde ${formatDate(activeLog.active_started_at, true)}</small><div><button class="btn btn-small btn-secondary" data-work-log-action="pause" data-work-log-id="${activeLog.id}">Pausar</button><button class="btn btn-small btn-primary" data-work-log-action="complete" data-work-log-id="${activeLog.id}">Concluir</button></div></div>` : ""}<form id="work-log-form" class="stack-form"><div class="form-grid two-columns"><label>Atividade<input name="title" required minlength="2" maxlength="180" placeholder="Ex.: Conferência de documentos" /></label><label>Tipo de lançamento<select name="entryMode"><option value="timer">Iniciar cronômetro</option><option value="manual">Lançar tempo manual</option></select></label><label>Vincular tarefa<select name="taskId"><option value="">Sem tarefa vinculada</option>${(tasks || []).map((task) => `<option value="${task.id}">${escapeHtml(task.title)}</option>`).join("")}</select></label><label>Vincular processo<select name="pipelineItemId"><option value="">Sem processo vinculado</option>${(processes || []).map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join("")}</select></label><label>Categoria<input name="category" maxlength="80" value="${escapeHtml(profileAccessLabel())}" /></label><label>Minutos <input name="manualMinutes" type="number" min="1" max="10080" placeholder="Obrigatório no lançamento manual" /></label></div><label>Observações<textarea name="notes" rows="2" maxlength="4000"></textarea></label><button class="btn btn-primary" type="submit">Salvar registro</button></form>${(logs || []).length ? `<div class="recent-work-logs">${(logs || []).map((log) => `<div><span><strong>${escapeHtml(log.title)}</strong><small>${escapeHtml(log.category)} · ${log.entry_mode === "manual" ? `${log.manual_minutes} min` : log.status === "running" ? "em andamento" : `${Math.round(Number(log.accumulated_seconds || 0) / 60)} min`}</small></span><em>${log.status === "completed" ? "Concluído" : log.status === "paused" ? "Pausado" : "Em andamento"}</em></div>`).join("")}</div>` : ""}</article>
+      <article class="card"><div class="card-head"><div><span class="eyebrow">Metas institucionais</span><h2>Referências da Direção</h2></div></div>${(report?.targets || []).length ? `<div class="target-list">${report.targets.map((target) => `<div><span><strong>${escapeHtml(target.label)}</strong><small>${target.department === "all" ? "Institucional" : departmentLabels[target.department] || target.department} · ${target.period}</small></span><b>${target.comparison === "maximum" ? "Até" : "Mínimo"} ${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(Number(target.target_value))}</b>${canManageTargets ? `<button class="text-link" data-delete-indicator-target="${target.id}">Excluir</button>` : ""}</div>`).join("")}</div>` : `<p class="muted-note">Ainda não há metas cadastradas. Elas são opcionais e nunca são preenchidas automaticamente.</p>`}${canManageTargets ? `<form id="indicator-target-form" class="stack-form target-form"><div class="form-section"><span>Nova meta</span></div><div class="form-grid two-columns"><label>Indicador<select name="metricKey" required>${(report?.metrics || []).map((item) => `<option value="${item.key}">${escapeHtml(item.label)}</option>`).join("")}</select></label><label>Nome da meta<input name="label" required minlength="2" maxlength="160" placeholder="Ex.: Reduzir tarefas vencidas" /></label><label>Área<select name="department"><option value="all">Institucional</option>${Object.entries(departmentLabels).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select></label><label>Periodicidade<select name="period"><option value="monthly">Mensal</option><option value="current">Atual</option><option value="quarterly">Trimestral</option><option value="annual">Anual</option></select></label><label>Comparação<select name="comparison"><option value="minimum">No mínimo</option><option value="maximum">No máximo</option></select></label><label>Valor<input name="targetValue" type="number" min="0" step="0.01" required /></label></div><button class="btn btn-secondary" type="submit">Salvar meta</button></form>` : `<p class="form-note">Somente a Direção e Administração pode criar ou alterar metas.</p>`}</article>
+    </section>`;
 }
 
 async function renderApprentices(content) {
@@ -3238,6 +3313,38 @@ app.addEventListener("click", async (event) => {
     state.automationTab = target.dataset.automationTab;
     return renderView();
   }
+  if (target.hasAttribute("data-export-indicators")) {
+    try {
+      const { data, error } = await supabase.rpc("get_portal_indicators", { period_start_value: state.indicatorStart, period_end_value: state.indicatorEnd });
+      if (error) throw error;
+      downloadTextFile(`indicadores-cafcm-${state.indicatorStart}-${state.indicatorEnd}.csv`, csvForIndicators(data), "text/csv;charset=utf-8");
+      await callAdmin({ action: "log_event", event: "reports.exported", entityId: `${state.indicatorStart}:${state.indicatorEnd}` }, true).catch(() => {});
+      return showToast("Relatório exportado em CSV e registrado na auditoria.");
+    } catch (error) { return showToast(friendlyError(error), "error"); }
+  }
+  if (target.dataset.workLogAction) {
+    const { data: log, error: logError } = await supabase.from("work_activity_logs").select("*").eq("id", target.dataset.workLogId).single();
+    if (logError) return showToast(friendlyError(logError), "error");
+    const now = new Date().toISOString();
+    const elapsed = log.status === "running" && log.active_started_at ? Math.max(0, Math.floor((Date.now() - new Date(log.active_started_at).getTime()) / 1000)) : 0;
+    const complete = target.dataset.workLogAction === "complete";
+    const { error } = await supabase.from("work_activity_logs").update({
+      status: complete ? "completed" : "paused",
+      active_started_at: null,
+      ended_at: complete ? now : null,
+      accumulated_seconds: Number(log.accumulated_seconds || 0) + elapsed,
+    }).eq("id", log.id);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast(complete ? "Registro concluído." : "Cronômetro pausado.");
+    return renderView();
+  }
+  if (target.dataset.deleteIndicatorTarget) {
+    if (!window.confirm("Excluir esta meta? Nenhum dado real será removido.")) return;
+    const { error } = await supabase.from("indicator_targets").delete().eq("id", target.dataset.deleteIndicatorTarget);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Meta removida.");
+    return renderView();
+  }
   if (target.dataset.openProcedurePipeline) {
     state.selectedPipelineId = target.dataset.openProcedurePipeline;
     return navigate("pipelines");
@@ -3949,6 +4056,59 @@ app.addEventListener("submit", async (event) => {
       await renderPortal();
       showToast(password ? "Perfil e senha atualizados." : "Perfil atualizado.");
       return;
+    }
+
+    if (form.id === "indicator-filter-form") {
+      if (values.start > values.end) throw new Error("A data inicial não pode ser posterior à data final.");
+      state.indicatorStart = String(values.start);
+      state.indicatorEnd = String(values.end);
+      state.indicatorGroup = String(values.group || "all");
+      return renderView();
+    }
+
+    if (form.id === "work-log-form") {
+      const manual = values.entryMode === "manual";
+      const taskId = String(values.taskId || "") || null;
+      const pipelineItemId = String(values.pipelineItemId || "") || null;
+      const minutes = Number(values.manualMinutes || 0);
+      if (manual && (!Number.isInteger(minutes) || minutes < 1 || minutes > 10080)) throw new Error("Informe entre 1 e 10.080 minutos para o lançamento manual.");
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("work_activity_logs").insert({
+        user_id: state.profile.id,
+        department: profileDepartment(),
+        task_id: taskId,
+        pipeline_item_id: pipelineItemId,
+        title: String(values.title || "").trim(),
+        category: String(values.category || "Operações").trim(),
+        entry_mode: manual ? "manual" : "timer",
+        status: manual ? "completed" : "running",
+        started_at: now,
+        active_started_at: manual ? null : now,
+        ended_at: manual ? now : null,
+        manual_minutes: manual ? minutes : 0,
+        accumulated_seconds: manual ? minutes * 60 : 0,
+        notes: String(values.notes || "").trim(),
+      });
+      if (error) throw error;
+      showToast(manual ? "Tempo registrado." : "Cronômetro iniciado.");
+      return renderView();
+    }
+
+    if (form.id === "indicator-target-form") {
+      if (profileDepartment() !== "management") throw new Error("Somente a Direção e Administração pode definir metas.");
+      const targetValue = Number(values.targetValue);
+      if (!Number.isFinite(targetValue) || targetValue < 0) throw new Error("Informe um valor de meta válido.");
+      const { error } = await supabase.from("indicator_targets").upsert({
+        metric_key: String(values.metricKey),
+        label: String(values.label).trim(),
+        department: String(values.department || "all"),
+        period: String(values.period || "monthly"),
+        comparison: String(values.comparison || "minimum"),
+        target_value: targetValue,
+      }, { onConflict: "metric_key,department,period" });
+      if (error) throw error;
+      showToast("Meta salva sem alterar os dados do portal.");
+      return renderView();
     }
 
     if (form.id === "company-form") {

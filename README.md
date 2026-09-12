@@ -9,6 +9,7 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Tarefas e Pendências:** responsáveis, prioridades, prazos, vínculos com processos e listas de verificação.
 - **Notificações:** avisos de atribuição e acesso direto ao item relacionado.
 - **Automações:** alertas de prazo, tarefas deduplicadas, documentos com revisão, e-mails conferidos pela equipe e preparação da futura integração bancária.
+- **Indicadores e relatórios:** painel executivo com dados reais, gargalos, tempo nas esteiras, exportação CSV, metas institucionais e registro de carga sem ranking de pessoas.
 - **Empresas e Jovens:** cadastros, vínculos, acompanhamento e histórico.
 - **Gestão de Vagas:** vagas, capacidade disponível, candidatos, currículos, encaminhamentos e retorno das empresas.
 - **Admissões e Contratos:** conversão do aprovado em jovem, checklist personalizável, vigência e alertas de 90, 60, 30, 15 e 7 dias.
@@ -140,6 +141,7 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 19. `supabase/migrations/20260910195458_phase_three_administration.sql`
 20. `supabase/migrations/20260911030417_phase_four_automations.sql`
 21. `supabase/migrations/20260911032000_phase_four_hardening.sql`
+22. `supabase/migrations/20260911152640_phase_five_indicators.sql`
 
 Os testes transacionais de banco estão em `supabase/tests/` e podem ser executados com `supabase test db` em um ambiente local do Supabase.
 
@@ -150,6 +152,7 @@ Revise os scripts antes de aplicá-los a uma base que já possui dados. A base C
 - As tabelas expostas usam Row Level Security (RLS).
 - A função administrativa confirma a sessão e o perfil `cafcm_admin` antes de operações privilegiadas.
 - A função de automações exige JWT válido e permite documentos e e-mails somente à Direção, Departamento Pessoal e Financeiro.
+- Indicadores e relatórios seguem as permissões de departamento; somente a Direção e Administração pode cadastrar metas. O registro de carga é individual para a equipe e a visão institucional não cria pontuação nem ranking.
 - A equipe CAFCM recebe permissões por departamento no `app_metadata`, espelhadas no perfil e protegidas por políticas restritivas.
 - Contas de empresa ficam vinculadas à empresa correspondente.
 - Ações relevantes são registradas na auditoria.
