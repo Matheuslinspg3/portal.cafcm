@@ -2209,6 +2209,29 @@ input:focus, select:focus, textarea:focus {
 .finance-amount strong { display: block; }
 .finance-amount small { margin-bottom: 4px; color: var(--muted); font-size: .66rem; }
 .finance-amount strong { color: var(--navy); font-size: .86rem; white-space: nowrap; }
+.wizard-create-action { margin: 2px 0 17px; }
+.finance-calendar { overflow: hidden; }
+.calendar-controls { display: flex; gap: 7px; }
+.calendar-key { display: inline-block; width: 9px; height: 9px; margin: 0 5px 0 13px; border-radius: 50%; }
+.calendar-key:first-child { margin-left: 0; }
+.calendar-key.receive { background: #2c72d6; }
+.calendar-key.pay { background: #c06a27; }
+.calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-weekdays { border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; overflow: hidden; background: #f7f9fc; }
+.calendar-weekdays span { padding: 9px 6px; color: var(--muted); text-align: center; font-size: .68rem; font-weight: 800; text-transform: uppercase; }
+.calendar-days { border: 1px solid var(--line); border-radius: 0 0 12px 12px; overflow: hidden; }
+.calendar-day { min-height: 124px; padding: 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fff; }
+.calendar-day:nth-child(7n) { border-right: 0; }
+.calendar-day:nth-last-child(-n+7) { border-bottom: 0; }
+.calendar-day > b { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; color: var(--navy); font-size: .72rem; }
+.calendar-day.today > b { background: var(--blue); color: #fff; }
+.calendar-day.outside { background: #fafbfd; }
+.calendar-day.outside > b { color: #afbac8; }
+.calendar-day > div { display: grid; gap: 4px; margin-top: 5px; }
+.calendar-event { overflow: hidden; padding: 4px 5px; border: 0; border-radius: 5px; color: #183557; background: #e7f0ff; text-align: left; font-size: .65rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.calendar-event.pay { color: #714218; background: #fff0df; }
+.calendar-event:disabled { cursor: default; opacity: 1; }
+.calendar-day small { color: var(--muted); font-size: .62rem; }
 
 @media (max-width: 1120px) {
   .pipeline-toolbar { grid-template-columns: minmax(220px, .65fr) minmax(300px, 1.35fr); }
@@ -2224,6 +2247,7 @@ input:focus, select:focus, textarea:focus {
   .finance-row .person-actions { grid-column: 2 / -1; }
   .apprentice-metrics,
   .apprentice-row .person-actions { grid-column: 2 / -1; }
+  .calendar-day { min-height: 108px; }
 }
 
 @media (max-width: 760px) {
@@ -2246,6 +2270,9 @@ input:focus, select:focus, textarea:focus {
   .notification-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .administrative-hub-grid { grid-template-columns: 1fr; }
   .automation-principles { grid-template-columns: 1fr; }
+  .calendar-day { min-height: 78px; padding: 5px; }
+  .calendar-event { padding: 3px; font-size: .56rem; }
+  .calendar-weekdays span { padding: 7px 2px; font-size: .58rem; }
 }
 
 @media (max-width: 500px) {
