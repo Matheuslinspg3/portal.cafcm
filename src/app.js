@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import { getPageGuide } from "./guides/catalog.mjs";
+import { createPageTour } from "./guides/tour.mjs";
+import { buildFormGuide } from "./guides/forms.mjs";
 
 const SUPABASE_URL = "https://cyovnmnxzrfptyfrivdr.supabase.co";
 const SUPABASE_KEY = "sb_publishable_otxl6dKO3VJ4G3qsNkfyoA_cP_EY6Lg";
@@ -28,7 +31,6 @@ const state = {
   auditPersonId: null,
   sessionLogged: false,
   wizardOpen: false,
-  wizardStep: 0,
   setupRequired: false,
   people: [],
   importResults: [],
@@ -60,6 +62,17 @@ const state = {
   indicatorEnd: "",
   indicatorGroup: "all",
 };
+
+const pageTour = createPageTour({
+  onStop: (reason) => {
+    state.wizardOpen = false;
+    if (reason === "completed") showToast("Guia concluído. Use Como usar para revê-lo nesta aba.");
+  },
+  onAction: async (action) => {
+    try { if (action.dialog) await openDialog(action.dialog); }
+    catch (error) { showToast(friendlyError(error), "error"); }
+  },
+});
 
 const roleLabels = {
   cafcm_admin: "Equipe CAFCM",
@@ -427,129 +440,7 @@ function navigationItems(profile = state.profile) {
   return navigationForProfile(profile).flatMap((group) => group.items || []);
 }
 
-const wizardContent = {
-  cafcm_admin: [
-    ["Acompanhe o que exige ação", "A Visão geral reúne tarefas vencidas, processos atrasados e os principais números da operação."],
-    ["Conduza os processos", "Na Central de Esteiras, selecione a área, crie o processo e mova o cartão conforme o trabalho avança. Cada movimentação fica registrada."],
-    ["Organize as pendências", "Crie tarefas com responsável, prioridade, prazo e checklist. Use os filtros para localizar o que está atrasado, previsto para hoje ou concluído."],
-    ["Mantenha os cadastros únicos", "Empresas e jovens são vinculados aos processos e às tarefas existentes, sem criar cadastros duplicados."],
-    ["Consulte o histórico", "Notificações informam novas atribuições, enquanto a Auditoria preserva as alterações realizadas pela equipe."],
-  ],
-  apprentice: [
-    ["Sua página inicial", "Aqui você encontra somente os cursos em que a CAFCM realizou sua matrícula."],
-    ["Aulas e progresso", "Abra uma aula e avance etapa por etapa. A conclusão é registrada ao chegar ao final da linha de aprendizagem."],
-    ["Envio de atividades", "Responda às atividades dentro do prazo. A empresa vê o status, mas não vê sua resposta."],
-  ],
-  company: [
-    ["Comece pela Visão geral", "Use os cartões do início para conferir quantos jovens estão vinculados, quantos já possuem matrícula e quantas atividades foram enviadas."],
-    ["Abra a lista de Aprendizes", "No menu Aprendizes, localize o jovem que deseja acompanhar. Os cursos vinculados aparecem logo abaixo do nome."],
-    ["Leia o progresso do curso", "A barra mostra o percentual de aulas concluídas. A linha de detalhes informa quantas aulas foram finalizadas e quantas atividades já foram enviadas."],
-    ["Avalie a situação", "Use os indicadores Ainda não iniciou, Em andamento e Concluído para identificar rapidamente quem precisa de atenção ou orientação."],
-    ["Defina a próxima ação", "Se notar pouco avanço ou atividades ainda não enviadas, converse com o jovem e alinhe o acompanhamento com a CAFCM. As respostas das atividades permanecem protegidas."],
-  ],
-};
-
-const departmentWizardContent = {
-  management: wizardContent.cafcm_admin,
-  vacancies: [
-    ["Comece pelas vagas", "Em Vagas e candidatos, acompanhe as oportunidades abertas, os candidatos vinculados e a etapa atual de cada seleção."],
-    ["Mantenha as empresas atualizadas", "Use Empresas parceiras para conferir os dados da organização antes de abrir uma vaga ou registrar uma parceria."],
-    ["Registre cada avanço", "Inclua o candidato na vaga correspondente e atualize o processo sempre que houver triagem, entrevista, aprovação ou encerramento."],
-    ["Organize sua rotina", "Use Tarefas e Pendências para registrar responsáveis, prazos e providências que ainda precisam ser concluídas."],
-  ],
-  coordination: [
-    ["Acompanhe os jovens", "Consulte Jovens / Aprendizes para localizar os participantes acompanhados pela CAFCM e conferir seus vínculos."],
-    ["Organize a formação", "Em Cursos, estruture aulas, linhas de aprendizagem e atividades antes de publicar o conteúdo."],
-    ["Gerencie as matrículas", "Em Matrículas, vincule cada jovem ao curso correto para liberar o acesso às aulas."],
-    ["Observe o andamento", "Use as conclusões e atividades registradas para orientar o jovem e alinhar o acompanhamento com a empresa."],
-  ],
-  personnel: [
-    ["Comece pelos cadastros", "Confirme a empresa e o jovem antes de iniciar uma admissão ou registrar um contrato."],
-    ["Conduza a admissão", "Abra a admissão, cumpra o checklist e mantenha documentos e prazos no mesmo registro."],
-    ["Acompanhe os contratos", "Registre vigência, função e situação do contrato para visualizar vencimentos e providências futuras."],
-    ["Registre ocorrências", "Use Férias e afastamentos ou Desligamentos para preservar datas, observações e o histórico do jovem."],
-    ["Encaminhe à contabilidade", "Em Contabilidade, registre o que foi enviado, o prazo, o retorno recebido e a conferência final."],
-  ],
-  hr: [
-    ["Organize empresas e candidatos", "Confira as empresas parceiras e use Vagas e candidatos para acompanhar recrutamento, triagem e seleção."],
-    ["Cuide dos acessos externos", "Em Pessoas e convites, crie e atualize acessos de jovens e representantes de empresas."],
-    ["Proteja os acessos da equipe", "Contas e departamentos da equipe CAFCM somente podem ser alterados pela Direção e Administração."],
-    ["Consulte o histórico", "Use a Auditoria para conferir convites, alterações de cadastro e ações relevantes realizadas no portal."],
-  ],
-  finance: [
-    ["Controle o que a CAFCM tem a receber", "Comece por uma cobrança: informe empresa, competência, valor e vencimento. Depois atualize NF, boleto, envio e recebimento."],
-    ["Registre o que a CAFCM tem a pagar", "Cadastre fornecedor, despesa, valor e vencimento. Os lembretes mantêm as contas próximas do prazo visíveis à equipe."],
-    ["Veja os vencimentos no calendário", "O calendário reúne cobranças e contas a pagar no mesmo mês, sem movimentar qualquer pagamento no banco."],
-    ["Organize os documentos", "Use Documentos para guardar notas fiscais, boletos e comprovantes no cadastro correspondente."],
-    ["Controle os encaminhamentos", "Em Contabilidade, registre assuntos, prazos, envios, retornos e conferências sem depender de controles paralelos."],
-  ],
-};
-
-const wizardActions = {
-  apprentice: [
-    { view: "student-home", label: "Abrir início" },
-    { view: "student-courses", label: "Abrir meus cursos" },
-    { view: "student-activities", label: "Abrir atividades" },
-  ],
-  company: [
-    { view: "company-home", label: "Abrir visão geral" },
-    { view: "company-apprentices", label: "Abrir aprendizes" },
-    { view: "company-apprentices", label: "Ver progresso" },
-    { view: "company-apprentices", label: "Ver situações" },
-    { view: "company-home", label: "Voltar à visão geral" },
-  ],
-  management: [
-    { view: "tasks", dialog: "task", label: "Criar primeira tarefa" },
-    { view: "pipelines", label: "Abrir esteiras" },
-    { view: "companies", dialog: "company", label: "Cadastrar empresa" },
-    { view: "documents", dialog: "document", label: "Enviar documento" },
-    { view: "audit", label: "Abrir auditoria" },
-  ],
-  vacancies: [
-    { view: "vacancies", dialog: "vacancy", label: "Abrir primeira vaga" },
-    { view: "companies", dialog: "company", label: "Cadastrar empresa" },
-    { view: "vacancies", dialog: "application", label: "Iniciar seleção" },
-    { view: "tasks", dialog: "task", label: "Criar tarefa" },
-  ],
-  coordination: [
-    { view: "apprentices", label: "Abrir jovens" },
-    { view: "courses", dialog: "course", label: "Criar primeiro curso" },
-    { view: "enrollments", dialog: "enrollment", label: "Criar matrícula" },
-    { view: "courses", label: "Abrir cursos" },
-  ],
-  personnel: [
-    { view: "admissions", dialog: "admission", label: "Criar admissão" },
-    { view: "contracts", dialog: "contract", label: "Criar contrato" },
-    { view: "leaves", dialog: "leave", label: "Registrar férias ou afastamento" },
-    { view: "terminations", dialog: "termination", label: "Abrir desligamento" },
-    { view: "accounting", dialog: "accounting", label: "Criar envio contábil" },
-  ],
-  hr: [
-    { view: "vacancies", dialog: "candidate", label: "Cadastrar candidato" },
-    { view: "people", dialog: "invite", label: "Enviar convite" },
-    { view: "people", label: "Abrir pessoas e convites" },
-    { view: "audit", label: "Abrir auditoria" },
-  ],
-  finance: [
-    { view: "finance", financeTab: "receivable", dialog: "financial-charge", label: "Criar primeira cobrança" },
-    { view: "finance", dialog: "payable", label: "Criar conta a pagar" },
-    { view: "finance", financeTab: "calendar", target: '[data-finance-tab="calendar"]', label: "Abrir calendário" },
-    { view: "documents", dialog: "document", label: "Enviar documento financeiro" },
-    { view: "accounting", dialog: "accounting", label: "Criar envio contábil" },
-  ],
-};
-
-function wizardSteps(profile = state.profile) {
-  return profile?.role === "cafcm_admin"
-    ? departmentWizardContent[profileDepartment(profile)] || wizardContent.cafcm_admin
-    : wizardContent[profile?.role] || [];
-}
-
-function wizardAction(profile = state.profile, index = state.wizardStep) {
-  if (!profile) return null;
-  const key = profile.role === "cafcm_admin" ? profileDepartment(profile) : profile.role;
-  return (wizardActions[key] || wizardActions.management)[index] || null;
-}
+// Guides are defined by page, not department; rendered permissions still apply.
 
 const icons = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
@@ -1020,8 +911,7 @@ async function loadPortal() {
   state.view = state.view && canAccessView(state.view, profile)
     ? state.view
     : defaultView(profile);
-  state.wizardOpen = !profile.onboarding_completed;
-  state.wizardStep = 0;
+  state.wizardOpen = false;
   if (!state.sessionLogged) {
     state.sessionLogged = true;
     callAdmin({ action: "log_event", event: "session.started" }, true).catch(() => {});
@@ -1030,6 +920,7 @@ async function loadPortal() {
 }
 
 async function renderPortal() {
+  pageTour.stop("navigation", false);
   const profile = state.profile;
   if (!profile) return;
   const nav = navigationForProfile(profile);
@@ -1055,7 +946,7 @@ async function renderPortal() {
         <nav aria-label="Navegação principal">
           ${nav.map((group) => `<section class="nav-group"><span class="nav-label">${escapeHtml(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item ${activeBase === id ? "active" : ""}" data-nav="${id}">${icon(iconName)}<span>${label}</span></button>`).join("")}</section>`).join("")}
         </nav>
-        <button class="guide-card" data-open-wizard>${icon("help")}<span><strong>Guia rápido</strong><small>Rever como usar</small></span></button>
+        <button class="guide-card" data-open-wizard>${icon("help")}<span><strong>Como usar esta aba</strong><small>Passo a passo da tela atual</small></span></button>
         <div class="sidebar-user"><span class="avatar">${escapeHtml(initials(profile.full_name))}</span><span><strong>${escapeHtml(profile.full_name || roleLabels[profile.role])}</strong><small>${escapeHtml(profileAccessLabel(profile))}</small></span></div>
       </aside>
       <section class="portal-main">
@@ -1075,10 +966,10 @@ async function renderPortal() {
   `;
 
   await renderView();
-  if (state.wizardOpen) renderWizard();
 }
 
 async function renderView() {
+  pageTour.stop("navigation", false);
   const content = document.querySelector("#main-content");
   if (!content) return;
   try {
@@ -1117,6 +1008,14 @@ async function renderView() {
       "company-apprentices": renderCompanyApprentices,
     };
     await (renderers[state.view] || renderers[defaultView(state.profile)])(content);
+    for (const form of content.querySelectorAll("form[id]")) {
+      const help = document.createElement("button");
+      help.type = "button";
+      help.className = "btn btn-small btn-quiet form-guide-help";
+      help.dataset.guideForm = form.id;
+      help.textContent = "Como preencher este formulário";
+      form.before(help);
+    }
   } catch (error) {
     console.error(error);
     content.innerHTML = errorState(error.message);
@@ -2622,89 +2521,19 @@ function companyRows(data, detailed = false) {
   }).join("")}</div>`;
 }
 
-function clearWizardHighlight() {
-  document.querySelectorAll(".wizard-highlight").forEach((element) => {
-    element.classList.remove("wizard-highlight");
-    element.removeAttribute("data-wizard-highlight");
-  });
-}
-
-function wizardTarget(action) {
-  if (!action) return null;
-  const selector = action.target || (action.dialog ? `[data-dialog="${action.dialog}"]` : `[data-nav="${action.view}"]`);
-  return document.querySelector(selector) || document.querySelector(`[data-nav="${action.view}"]`);
-}
-
-function positionWizardTour(target) {
-  const tour = document.querySelector(".wizard-tour");
-  if (!tour) return;
-  if (!target || window.innerWidth < 780) {
-    tour.style.left = "16px";
-    tour.style.right = "16px";
-    tour.style.top = "auto";
-    tour.style.bottom = "16px";
-    return;
-  }
-  const rect = target.getBoundingClientRect();
-  const width = Math.min(360, window.innerWidth - 32);
-  let left = rect.right + 18;
-  if (left + width > window.innerWidth - 16) left = Math.max(16, rect.left - width - 18);
-  const top = Math.max(16, Math.min(rect.top, window.innerHeight - 360));
-  tour.style.left = `${left}px`;
-  tour.style.top = `${top}px`;
-  tour.style.right = "auto";
-  tour.style.bottom = "auto";
-}
-
-async function startWizardStep(index = 0) {
-  const steps = wizardSteps(state.profile);
-  if (!steps.length) return;
-  state.wizardOpen = true;
-  state.wizardStep = Math.max(0, Math.min(index, steps.length - 1));
-  const action = wizardAction();
-  if (action?.financeTab) state.financeTab = action.financeTab;
-  if (action?.view && state.view !== action.view) return navigate(action.view);
-  renderWizard();
-}
-
+// The guide always describes the current page/subtab. It never changes navigation.
 function renderWizard() {
-  const root = document.querySelector("#overlay-root");
-  if (!root || !state.profile) return;
-  const steps = wizardSteps(state.profile);
-  const index = Math.min(state.wizardStep, steps.length - 1);
-  const [title, text] = steps[index];
-  const action = wizardAction(state.profile, index);
-  root.innerHTML = `
-    <div class="wizard-tour-mask" aria-hidden="true"></div>
-    <section class="wizard-tour" role="dialog" aria-label="Guia interativo">
-      <div class="wizard-tour-head"><span>${icon("help")} Guia interativo</span><button class="dialog-close" data-close-wizard aria-label="Fechar guia">${icon("close")}</button></div>
-      <div class="wizard-progress">${steps.map((_, stepIndex) => `<span class="${stepIndex <= index ? "active" : ""}"></span>`).join("")}</div>
-      <p class="eyebrow">Passo ${index + 1} de ${steps.length}</p>
-      <h2 id="wizard-title">${escapeHtml(title)}</h2>
-      <p>${escapeHtml(text)}</p>
-      <small class="wizard-tour-hint">A área relacionada está destacada na tela.</small>
-      ${action ? `<button class="btn btn-secondary wizard-create-action" data-wizard-create data-wizard-view="${action.view}" ${action.dialog ? `data-wizard-dialog="${action.dialog}"` : ""}>${icon("plus")} ${escapeHtml(action.label)}</button>` : ""}
-      <div class="wizard-actions">
-        <button class="btn btn-quiet" data-wizard-back ${index === 0 ? "disabled" : ""}>Voltar</button>
-        ${index === steps.length - 1
-          ? `<button class="btn btn-primary" data-wizard-finish>Concluir guia</button>`
-          : `<button class="btn btn-primary" data-wizard-next>Próximo ${icon("arrow")}</button>`}
-      </div>
-    </section>
-  `;
-  requestAnimationFrame(() => {
-    clearWizardHighlight();
-    const target = wizardTarget(action);
-    if (target) {
-      target.classList.add("wizard-highlight");
-      target.dataset.wizardHighlight = "true";
-      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    }
-    requestAnimationFrame(() => positionWizardTour(target));
-  });
+  if (!state.profile || !canAccessView(state.view, state.profile)) return;
+  const dialog = document.querySelector("#overlay-root .dialog");
+  const guide = (dialog && buildFormGuide(dialog, dialog.querySelector("h2")?.textContent || "Cadastro"))
+    || getPageGuide(state, hasPermission);
+  if (!guide) return showToast("Esta tela ainda não possui um guia.");
+  document.querySelector(".portal-shell")?.classList.remove("menu-open");
+  state.wizardOpen = pageTour.start(guide);
 }
 
 async function openDialog(type, recordId = null) {
+  pageTour.stop("dialog", false);
   const root = document.querySelector("#overlay-root");
   if (!root) return;
   let body = "";
@@ -3258,7 +3087,7 @@ async function openDialog(type, recordId = null) {
     response: "Responder atividade",
   };
   const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "leave", "termination", "accounting", "document", "document-requirement", "financial-charge", "payable", "email-draft", "document-generation", "banking-integration", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
-  root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>${body}</section></div>`;
+  root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><div class="dialog-help-actions">${body.includes("<form") ? `<button type="button" class="btn btn-small btn-quiet" data-open-wizard>${icon("help")} Como preencher</button>` : ""}<button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div></div>${body}</section></div>`;
 }
 
 function renderInviteCredentials(email, password, mode = "invite") {
@@ -3430,6 +3259,7 @@ async function exportPeopleBackup() {
 }
 
 function closeOverlay() {
+  pageTour.stop("dialog", false);
   const root = document.querySelector("#overlay-root");
   if (root) root.innerHTML = "";
 }
@@ -3474,12 +3304,6 @@ async function movePipelineItem(itemId, stageId) {
 app.addEventListener("click", async (event) => {
   const target = event.target.closest("button, [data-nav]");
   if (!target) return;
-
-  if (state.wizardOpen && target.dataset.wizardHighlight) {
-    state.wizardOpen = false;
-    clearWizardHighlight();
-    closeOverlay();
-  }
 
   if (target.dataset.authMode) return renderLogin(target.dataset.authMode);
   if (target.hasAttribute("data-open-menu")) return document.querySelector(".portal-shell")?.classList.add("menu-open");
@@ -3559,38 +3383,13 @@ app.addEventListener("click", async (event) => {
     history.replaceState({}, "", location.pathname);
     return renderLogin();
   }
-  if (target.hasAttribute("data-open-wizard")) {
-    return startWizardStep(0);
-  }
-  if (target.hasAttribute("data-close-wizard")) {
-    state.wizardOpen = false;
-    clearWizardHighlight();
-    return closeOverlay();
-  }
-  if (target.hasAttribute("data-wizard-next")) {
-    return startWizardStep(state.wizardStep + 1);
-  }
-  if (target.hasAttribute("data-wizard-back")) {
-    return startWizardStep(state.wizardStep - 1);
-  }
-  if (target.hasAttribute("data-wizard-create")) {
-    const view = target.dataset.wizardView;
-    const dialog = target.dataset.wizardDialog;
-    state.wizardOpen = false;
-    clearWizardHighlight();
-    closeOverlay();
-    await navigate(view);
-    if (dialog) return openDialog(dialog);
+  if (target.hasAttribute("data-open-wizard")) return renderWizard();
+  if (target.dataset.guideForm) {
+    const form = document.getElementById(target.dataset.guideForm);
+    if (!form || !form.closest("#main-content")) return;
+    const guide = buildFormGuide(form, form.closest(".card")?.querySelector("h2")?.textContent || "Preenchimento");
+    if (guide) state.wizardOpen = pageTour.start(guide);
     return;
-  }
-  if (target.hasAttribute("data-wizard-finish")) {
-    const { error } = await supabase.from("profiles").update({ onboarding_completed: true }).eq("id", state.profile.id);
-    if (error) return showToast(error.message, "error");
-    state.profile.onboarding_completed = true;
-    state.wizardOpen = false;
-    clearWizardHighlight();
-    closeOverlay();
-    return showToast("Guia concluído. Você pode revê-lo a qualquer momento.");
   }
   if (target.dataset.dialog) return openDialog(target.dataset.dialog);
   if (target.dataset.taskFilter) {

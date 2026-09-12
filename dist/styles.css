@@ -1265,100 +1265,49 @@ input:focus, select:focus, textarea:focus {
 .credential-box small { margin-bottom: 5px; color: var(--muted); font-size: .73rem; }
 .credential-box code { color: var(--navy); font-size: .94rem; font-weight: 800; word-break: break-all; }
 
-.wizard {
-  position: relative;
-  width: min(100%, 790px);
-  min-height: 440px;
-  border-radius: 25px;
-  overflow: hidden;
-  display: grid;
-  grid-template-columns: .82fr 1.18fr;
-  background: #fff;
-  box-shadow: 0 28px 90px rgba(0,13,43,.4);
+/* Contextual guides use a native dialog so highlights also work above fixed menus. */
+.page-tour-root {
+  position: fixed; inset: 0; width: 100vw; height: 100dvh;
+  max-width: none; max-height: none; margin: 0; padding: 0;
+  border: 0; overflow: hidden; background: transparent; color: var(--ink);
 }
-.wizard > .dialog-close { position: absolute; top: 17px; right: 17px; z-index: 2; }
-.wizard-visual {
-  padding: 42px 34px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  color: #fff;
-  background:
-    radial-gradient(circle at 25% 20%, rgba(25,203,211,.35), transparent 28%),
-    linear-gradient(145deg, #0867e7, #072a65);
+.page-tour-root::backdrop { background: transparent; }
+.page-tour-unanchored { background: rgba(3, 18, 44, .65); }
+.page-tour-spotlight {
+  position: fixed; pointer-events: none; border: 3px solid #73e1e7;
+  border-radius: 10px; box-shadow: 0 0 0 9999px rgba(3, 18, 44, .65);
 }
-.wizard-visual > span {
-  width: 72px;
-  height: 72px;
-  margin-bottom: auto;
-  border-radius: 21px;
-  display: grid;
-  place-items: center;
-  color: #99f2f4;
-  background: rgba(255,255,255,.1);
+.page-tour-panel {
+  position: fixed; width: min(390px, calc(100vw - 24px));
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid #c6dff9; border-radius: 19px; background: #fff;
+  box-shadow: 0 20px 70px rgba(0, 13, 43, .35);
 }
-.wizard-visual > span .icon { width: 34px; height: 34px; }
-.wizard-visual small { color: rgba(255,255,255,.62); }
-.wizard-visual strong { margin-top: 6px; font: 800 1.25rem "Manrope",sans-serif; }
-.wizard-copy { padding: 54px 42px 36px; display: flex; flex-direction: column; }
-.wizard-copy h2 { margin-bottom: 14px; font-size: 1.55rem; letter-spacing: -.03em; }
-.wizard-copy > p:not(.eyebrow) { color: var(--muted); font-size: .98rem; line-height: 1.7; }
-.wizard-progress { margin-bottom: 33px; display: flex; gap: 7px; }
-.wizard-progress span { width: 34px; height: 5px; border-radius: 99px; background: #e4eaf2; }
-.wizard-progress span.active { background: var(--blue); }
-.wizard-actions {
-  margin-top: auto;
-  padding-top: 28px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+.page-tour-header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.page-tour-header small { display: block; margin-bottom: 5px; color: #0962ce; font-weight: 800; font-size: .64rem; letter-spacing: .1em; }
+.page-tour-header strong { color: var(--navy); font-size: .9rem; }
+.page-tour-close { width: 32px; height: 32px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 9px; background: #f4f7fb; color: var(--navy); font-size: 1.25rem; }
+.page-tour-index-label { display: grid; gap: 6px; padding: 12px 20px 0; color: #53647c; font-size: .72rem; font-weight: 700; }
+.page-tour-index { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #f8fbff; color: var(--ink); font-size: .8rem; }
+.page-tour-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 4px; }
+.page-tour-body h2 { margin: 8px 0 12px; font-size: 1.2rem; line-height: 1.35; }
+.page-tour-body h2:focus { outline: none; }
+.page-tour-body > p { font-size: .88rem; line-height: 1.65; }
+.page-tour-body .page-tour-progress { margin: 0; color: #0962ce; font-size: .72rem; font-weight: 800; }
+.page-tour-note { padding: 10px; border-radius: 9px; background: #fff5e6; color: #764510; }
+.page-tour-body .page-tour-safety { margin: 14px 0; color: #64748b; font-size: .7rem; }
+.page-tour-action { width: 100%; }
+.page-tour-footer { display: flex; flex-shrink: 0; justify-content: space-between; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); background: #f8fbff; }
+.page-tour-root button:focus-visible, .page-tour-root select:focus-visible { outline: 3px solid #0968e8; outline-offset: 3px; }
+.form-guide-help { margin: 12px 0; }
+.dialog-help-actions { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 540px) {
+  .page-tour-header { padding: 12px 15px; }
+  .page-tour-index-label { padding: 10px 15px 0; }
+  .page-tour-body { padding: 12px 15px 0; }
+  .page-tour-footer { padding: 12px 15px; }
+  .dialog-help-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
-.wizard-tour-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  background: rgba(3, 18, 44, .58);
-  backdrop-filter: blur(2px);
-}
-.wizard-highlight {
-  position: relative !important;
-  z-index: 130 !important;
-  outline: 3px solid #93f3f5;
-  outline-offset: 4px;
-  box-shadow: 0 0 0 8px rgba(8, 103, 231, .28), 0 12px 34px rgba(0, 12, 38, .35) !important;
-}
-.wizard-tour {
-  position: fixed;
-  z-index: 140;
-  width: min(360px, calc(100vw - 32px));
-  padding: 22px;
-  border: 1px solid rgba(146, 214, 255, .7);
-  border-radius: 20px;
-  color: var(--ink);
-  background: #fff;
-  box-shadow: 0 24px 70px rgba(0, 13, 43, .42);
-}
-.wizard-tour-head {
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--blue);
-  font-size: .78rem;
-  font-weight: 850;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-.wizard-tour-head > span { display: inline-flex; align-items: center; gap: 7px; }
-.wizard-tour-head .icon { width: 17px; height: 17px; }
-.wizard-tour-head .dialog-close { position: static; color: var(--muted); }
-.wizard-tour .wizard-progress { margin-bottom: 20px; }
-.wizard-tour h2 { margin: 8px 0 10px; font-size: 1.22rem; letter-spacing: -.025em; }
-.wizard-tour > p:not(.eyebrow) { color: var(--muted); font-size: .91rem; line-height: 1.6; }
-.wizard-tour-hint { margin-top: 13px; display: block; color: #4d6684; font-size: .77rem; line-height: 1.4; }
-.wizard-tour .wizard-create-action { width: 100%; margin-top: 16px; }
-.wizard-tour .wizard-actions { margin-top: 2px; padding-top: 18px; }
 
 .toast {
   position: fixed;
@@ -1466,13 +1415,6 @@ input:focus, select:focus, textarea:focus {
   .editor-actions { max-width: none; justify-content: flex-start; }
   .credential-box { align-items: stretch; flex-direction: column; }
   .company-course { grid-template-columns: 1fr; }
-  .wizard { grid-template-columns: 1fr; }
-  .wizard-visual { min-height: 150px; padding: 25px; }
-  .wizard-visual > span { width: 48px; height: 48px; margin: 0 0 18px; }
-  .wizard-visual > span .icon { width: 24px; height: 24px; }
-  .wizard-copy { padding: 32px 24px 24px; }
-  .wizard-progress { margin-bottom: 24px; }
-  .wizard-tour { left: 16px !important; right: 16px !important; top: auto !important; bottom: 16px !important; width: auto; max-height: min(510px, calc(100vh - 32px)); overflow-y: auto; }
   .progress-ring { width: 92px; height: 92px; }
 }
 
@@ -1491,9 +1433,6 @@ input:focus, select:focus, textarea:focus {
   .student-course-head h1 { font-size: 1.65rem; }
   .dialog-backdrop { padding: 10px; }
   .dialog { max-height: calc(100vh - 20px); padding: 20px; border-radius: 18px; }
-  .wizard { max-height: calc(100vh - 20px); overflow-y: auto; }
-  .wizard-actions { flex-direction: column-reverse; }
-  .wizard-actions .btn { width: 100%; }
 }
 
 /* People management, audit and learning paths */
@@ -2256,7 +2195,6 @@ input:focus, select:focus, textarea:focus {
 .finance-amount strong { display: block; }
 .finance-amount small { margin-bottom: 4px; color: var(--muted); font-size: .66rem; }
 .finance-amount strong { color: var(--navy); font-size: .86rem; white-space: nowrap; }
-.wizard-create-action { margin: 2px 0 17px; }
 .finance-calendar { overflow: hidden; }
 .calendar-controls { display: flex; gap: 7px; }
 .calendar-key { display: inline-block; width: 9px; height: 9px; margin: 0 5px 0 13px; border-radius: 50%; }

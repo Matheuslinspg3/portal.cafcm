@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [source, bundle, migration] = await Promise.all([
+const [source, bundle, migration, guides] = await Promise.all([
   readFile(new URL("../src/app.js", import.meta.url), "utf8"),
   readFile(new URL("../dist/app.js", import.meta.url), "utf8"),
   readFile(new URL("../supabase/migrations/20260912110000_phase_six_accounts_payable_onboarding.sql", import.meta.url), "utf8"),
+  readFile(new URL("../src/guides/catalog.mjs", import.meta.url), "utf8"),
 ]);
 
 test("contas a pagar ficam separadas das cobranças a receber", () => {
@@ -34,12 +35,12 @@ test("financeiro e direção mantêm o acesso protegido", () => {
   assert.match(migration, /capture_administrative_audit/);
 });
 
-test("o guia leva cada departamento a um primeiro cadastro real", () => {
-  assert.match(source, /wizardActions/);
-  assert.match(source, /data-wizard-create/);
-  assert.match(source, /Criar conta a pagar/);
-  assert.match(source, /Criar primeira cobrança/);
-  assert.match(bundle, /data-wizard-create/);
+test("o guia da aba financeira orienta o primeiro cadastro real", () => {
+  assert.match(source, /getPageGuide\(state, hasPermission\)/);
+  assert.match(guides, /create\('payable'/);
+  assert.match(guides, /Criar conta a pagar/);
+  assert.match(guides, /Criar primeira cobrança/);
+  assert.match(bundle, /page-tour-action/);
 });
 
 test("a fase não cria dados fictícios, chaves bancárias ou conteúdo de desenvolvimento", () => {

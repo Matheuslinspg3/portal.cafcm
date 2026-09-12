@@ -104,6 +104,14 @@ O SMTP acima atende convites, confirmação de conta e recuperação de senha. P
 
 A função `portal-automation` permanece segura sem esses segredos: documentos e alertas funcionam normalmente, e uma tentativa de e-mail retorna uma orientação de configuração sem expor credenciais.
 
+## Guias interativos
+
+Abra uma aba e clique em **Como usar** no cabeçalho ou em **Como usar esta aba** no menu. O roteiro explica os controles da tela atual, com destaque visual, Voltar, Próximo e um índice para ir direto ao assunto. As subabas de Financeiro, Gestão de Vagas, Documentos e Automações possuem roteiros próprios.
+
+Em cadastros, use **Como preencher** para consultar a finalidade e as restrições de cada campo. A ajuda considera os campos visíveis e as permissões do perfil. Fechar ou concluir o guia preserva o formulário; percorrer as etapas não cria registros nem envia dados. **Abrir formulário** apenas abre o cadastro para preenchimento posterior.
+
+Os 43 roteiros ficam em `src/guides/catalog.mjs`. O comportamento do destaque e a ajuda dos formulários ficam em `src/guides/tour.mjs` e `src/guides/forms.mjs`. Esta atualização não exige migração de banco.
+
 ## Desenvolvimento local
 
 Requer Node.js 22 ou mais recente.
@@ -115,6 +123,8 @@ npm test
 ```
 
 Sirva a pasta `dist` por HTTP. O portal usa a origem atual do navegador para montar links de autenticação, portanto funciona em produção e em ambiente local sem alterar o código-fonte.
+
+Para conferir somente os guias, `node tests/guide-preview-server.mjs` inicia uma prévia isolada na porta 4173, com dados em memória e gravações bloqueadas. Esse arquivo não participa do build de produção. A opção `--export <pasta>` gera os arquivos da mesma prévia e uma página com quadro de 390 px para conferir o comportamento em tela pequena.
 
 ## Banco de dados
 
