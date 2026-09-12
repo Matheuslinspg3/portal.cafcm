@@ -477,14 +477,27 @@ const departmentWizardContent = {
     ["Consulte o histórico", "Use a Auditoria para conferir convites, alterações de cadastro e ações relevantes realizadas no portal."],
   ],
   finance: [
-    ["Comece pelo Financeiro", "Registre cada cobrança por empresa, competência e vencimento; depois atualize NF, boleto, envio e pagamento."],
-    ["Controle os encaminhamentos", "Em Contabilidade, registre assuntos, prazos, envios, retornos e conferências sem depender de controles paralelos."],
+    ["Controle o que a CAFCM tem a receber", "Comece por uma cobrança: informe empresa, competência, valor e vencimento. Depois atualize NF, boleto, envio e recebimento."],
+    ["Registre o que a CAFCM tem a pagar", "Cadastre fornecedor, despesa, valor e vencimento. Os lembretes mantêm as contas próximas do prazo visíveis à equipe."],
+    ["Veja os vencimentos no calendário", "O calendário reúne cobranças e contas a pagar no mesmo mês, sem movimentar qualquer pagamento no banco."],
     ["Organize os documentos", "Use Documentos para guardar notas fiscais, boletos e comprovantes no cadastro correspondente."],
-    ["Acompanhe os procedimentos", "Em Procedimentos, confira processos, responsáveis, tarefas e prazos das rotinas administrativas."],
+    ["Controle os encaminhamentos", "Em Contabilidade, registre assuntos, prazos, envios, retornos e conferências sem depender de controles paralelos."],
   ],
 };
 
 const wizardActions = {
+  apprentice: [
+    { view: "student-home", label: "Abrir início" },
+    { view: "student-courses", label: "Abrir meus cursos" },
+    { view: "student-activities", label: "Abrir atividades" },
+  ],
+  company: [
+    { view: "company-home", label: "Abrir visão geral" },
+    { view: "company-apprentices", label: "Abrir aprendizes" },
+    { view: "company-apprentices", label: "Ver progresso" },
+    { view: "company-apprentices", label: "Ver situações" },
+    { view: "company-home", label: "Voltar à visão geral" },
+  ],
   management: [
     { view: "tasks", dialog: "task", label: "Criar primeira tarefa" },
     { view: "pipelines", label: "Abrir esteiras" },
@@ -518,8 +531,9 @@ const wizardActions = {
     { view: "audit", label: "Abrir auditoria" },
   ],
   finance: [
-    { view: "finance", dialog: "financial-charge", label: "Criar primeira cobrança" },
+    { view: "finance", financeTab: "receivable", dialog: "financial-charge", label: "Criar primeira cobrança" },
     { view: "finance", dialog: "payable", label: "Criar conta a pagar" },
+    { view: "finance", financeTab: "calendar", target: '[data-finance-tab="calendar"]', label: "Abrir calendário" },
     { view: "documents", dialog: "document", label: "Enviar documento financeiro" },
     { view: "accounting", dialog: "accounting", label: "Criar envio contábil" },
   ],
@@ -532,8 +546,9 @@ function wizardSteps(profile = state.profile) {
 }
 
 function wizardAction(profile = state.profile, index = state.wizardStep) {
-  if (profile?.role !== "cafcm_admin") return null;
-  return (wizardActions[profileDepartment(profile)] || wizardActions.management)[index] || null;
+  if (!profile) return null;
+  const key = profile.role === "cafcm_admin" ? profileDepartment(profile) : profile.role;
+  return (wizardActions[key] || wizardActions.management)[index] || null;
 }
 
 const icons = {
@@ -2607,6 +2622,51 @@ function companyRows(data, detailed = false) {
   }).join("")}</div>`;
 }
 
+function clearWizardHighlight() {
+  document.querySelectorAll(".wizard-highlight").forEach((element) => {
+    element.classList.remove("wizard-highlight");
+    element.removeAttribute("data-wizard-highlight");
+  });
+}
+
+function wizardTarget(action) {
+  if (!action) return null;
+  const selector = action.target || (action.dialog ? `[data-dialog="${action.dialog}"]` : `[data-nav="${action.view}"]`);
+  return document.querySelector(selector) || document.querySelector(`[data-nav="${action.view}"]`);
+}
+
+function positionWizardTour(target) {
+  const tour = document.querySelector(".wizard-tour");
+  if (!tour) return;
+  if (!target || window.innerWidth < 780) {
+    tour.style.left = "16px";
+    tour.style.right = "16px";
+    tour.style.top = "auto";
+    tour.style.bottom = "16px";
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  const width = Math.min(360, window.innerWidth - 32);
+  let left = rect.right + 18;
+  if (left + width > window.innerWidth - 16) left = Math.max(16, rect.left - width - 18);
+  const top = Math.max(16, Math.min(rect.top, window.innerHeight - 360));
+  tour.style.left = `${left}px`;
+  tour.style.top = `${top}px`;
+  tour.style.right = "auto";
+  tour.style.bottom = "auto";
+}
+
+async function startWizardStep(index = 0) {
+  const steps = wizardSteps(state.profile);
+  if (!steps.length) return;
+  state.wizardOpen = true;
+  state.wizardStep = Math.max(0, Math.min(index, steps.length - 1));
+  const action = wizardAction();
+  if (action?.financeTab) state.financeTab = action.financeTab;
+  if (action?.view && state.view !== action.view) return navigate(action.view);
+  renderWizard();
+}
+
 function renderWizard() {
   const root = document.querySelector("#overlay-root");
   if (!root || !state.profile) return;
@@ -2615,26 +2675,33 @@ function renderWizard() {
   const [title, text] = steps[index];
   const action = wizardAction(state.profile, index);
   root.innerHTML = `
-    <div class="dialog-backdrop">
-      <section class="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
-        <button class="dialog-close" data-close-wizard aria-label="Fechar guia">${icon("close")}</button>
-        <div class="wizard-visual"><span>${icon(index === 0 ? "home" : index === steps.length - 1 ? "shield" : "arrow")}</span><small>Guia de uso</small><strong>${escapeHtml(profileAccessLabel(state.profile))}</strong></div>
-        <div class="wizard-copy">
-          <div class="wizard-progress">${steps.map((_, stepIndex) => `<span class="${stepIndex <= index ? "active" : ""}"></span>`).join("")}</div>
-          <p class="eyebrow">Passo ${index + 1} de ${steps.length}</p>
-          <h2 id="wizard-title">${title}</h2>
-          <p>${text}</p>
-          ${action ? `<button class="btn btn-secondary wizard-create-action" data-wizard-create data-wizard-view="${action.view}" ${action.dialog ? `data-wizard-dialog="${action.dialog}"` : ""}>${icon("plus")} ${action.label}</button>` : ""}
-          <div class="wizard-actions">
-            <button class="btn btn-quiet" data-wizard-back ${index === 0 ? "disabled" : ""}>Voltar</button>
-            ${index === steps.length - 1
-              ? `<button class="btn btn-primary" data-wizard-finish>Concluir guia</button>`
-              : `<button class="btn btn-primary" data-wizard-next>Próximo ${icon("arrow")}</button>`}
-          </div>
-        </div>
-      </section>
-    </div>
+    <div class="wizard-tour-mask" aria-hidden="true"></div>
+    <section class="wizard-tour" role="dialog" aria-label="Guia interativo">
+      <div class="wizard-tour-head"><span>${icon("help")} Guia interativo</span><button class="dialog-close" data-close-wizard aria-label="Fechar guia">${icon("close")}</button></div>
+      <div class="wizard-progress">${steps.map((_, stepIndex) => `<span class="${stepIndex <= index ? "active" : ""}"></span>`).join("")}</div>
+      <p class="eyebrow">Passo ${index + 1} de ${steps.length}</p>
+      <h2 id="wizard-title">${escapeHtml(title)}</h2>
+      <p>${escapeHtml(text)}</p>
+      <small class="wizard-tour-hint">A área relacionada está destacada na tela.</small>
+      ${action ? `<button class="btn btn-secondary wizard-create-action" data-wizard-create data-wizard-view="${action.view}" ${action.dialog ? `data-wizard-dialog="${action.dialog}"` : ""}>${icon("plus")} ${escapeHtml(action.label)}</button>` : ""}
+      <div class="wizard-actions">
+        <button class="btn btn-quiet" data-wizard-back ${index === 0 ? "disabled" : ""}>Voltar</button>
+        ${index === steps.length - 1
+          ? `<button class="btn btn-primary" data-wizard-finish>Concluir guia</button>`
+          : `<button class="btn btn-primary" data-wizard-next>Próximo ${icon("arrow")}</button>`}
+      </div>
+    </section>
   `;
+  requestAnimationFrame(() => {
+    clearWizardHighlight();
+    const target = wizardTarget(action);
+    if (target) {
+      target.classList.add("wizard-highlight");
+      target.dataset.wizardHighlight = "true";
+      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }
+    requestAnimationFrame(() => positionWizardTour(target));
+  });
 }
 
 async function openDialog(type, recordId = null) {
@@ -3408,6 +3475,12 @@ app.addEventListener("click", async (event) => {
   const target = event.target.closest("button, [data-nav]");
   if (!target) return;
 
+  if (state.wizardOpen && target.dataset.wizardHighlight) {
+    state.wizardOpen = false;
+    clearWizardHighlight();
+    closeOverlay();
+  }
+
   if (target.dataset.authMode) return renderLogin(target.dataset.authMode);
   if (target.hasAttribute("data-open-menu")) return document.querySelector(".portal-shell")?.classList.add("menu-open");
   if (target.hasAttribute("data-close-menu")) return document.querySelector(".portal-shell")?.classList.remove("menu-open");
@@ -3487,26 +3560,24 @@ app.addEventListener("click", async (event) => {
     return renderLogin();
   }
   if (target.hasAttribute("data-open-wizard")) {
-    state.wizardOpen = true;
-    state.wizardStep = 0;
-    return renderWizard();
+    return startWizardStep(0);
   }
   if (target.hasAttribute("data-close-wizard")) {
     state.wizardOpen = false;
+    clearWizardHighlight();
     return closeOverlay();
   }
   if (target.hasAttribute("data-wizard-next")) {
-    state.wizardStep += 1;
-    return renderWizard();
+    return startWizardStep(state.wizardStep + 1);
   }
   if (target.hasAttribute("data-wizard-back")) {
-    state.wizardStep = Math.max(0, state.wizardStep - 1);
-    return renderWizard();
+    return startWizardStep(state.wizardStep - 1);
   }
   if (target.hasAttribute("data-wizard-create")) {
     const view = target.dataset.wizardView;
     const dialog = target.dataset.wizardDialog;
     state.wizardOpen = false;
+    clearWizardHighlight();
     closeOverlay();
     await navigate(view);
     if (dialog) return openDialog(dialog);
@@ -3517,6 +3588,7 @@ app.addEventListener("click", async (event) => {
     if (error) return showToast(error.message, "error");
     state.profile.onboarding_completed = true;
     state.wizardOpen = false;
+    clearWizardHighlight();
     closeOverlay();
     return showToast("Guia concluído. Você pode revê-lo a qualquer momento.");
   }
