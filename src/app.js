@@ -1,3 +1,6 @@
+import { renderSidebar } from "./navigation/sidebar.mjs";
+import { resolveRoute, pushRoute, pushView, replaceRoute } from "./router/router.mjs";
+
 import { createClient } from "@supabase/supabase-js";
 import { getPageGuide } from "./guides/catalog.mjs";
 import { createPageTour } from "./guides/tour.mjs";
@@ -908,9 +911,18 @@ async function loadPortal() {
   }
 
   state.profile = profile;
+  // Use router to resolve URL to view
+  const resolved = resolveRoute(state);
+
+  // If no state.view yet, or resolved invalid, fallback to default
   state.view = state.view && canAccessView(state.view, profile)
     ? state.view
     : defaultView(profile);
+
+  // If we fell back, redirect to canonical URL
+  if (!resolved && state.view) {
+    replaceRoute(viewToUrl[state.view] || "/");
+  }
   state.wizardOpen = false;
   if (!state.sessionLogged) {
     state.sessionLogged = true;
@@ -938,18 +950,10 @@ async function renderPortal() {
     state.notificationUnreadCount = 0;
   }
 
-  app.innerHTML = `
-    <div class="portal-shell">
-      <button class="sidebar-scrim" data-close-menu aria-label="Fechar menu"></button>
-      <aside class="sidebar">
-        <div class="sidebar-head">${brand(true)}<button class="icon-btn sidebar-close" data-close-menu aria-label="Fechar menu">${icon("close")}</button></div>
-        <nav aria-label="Navegação principal">
-          ${nav.map((group) => `<section class="nav-group"><span class="nav-label">${escapeHtml(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item ${activeBase === id ? "active" : ""}" data-nav="${id}">${icon(iconName)}<span>${label}</span></button>`).join("")}</section>`).join("")}
-        </nav>
-        <button class="guide-card" data-open-wizard>${icon("help")}<span><strong>Como usar esta aba</strong><small>Passo a passo da tela atual</small></span></button>
-        <div class="sidebar-user"><span class="avatar">${escapeHtml(initials(profile.full_name))}</span><span><strong>${escapeHtml(profile.full_name || roleLabels[profile.role])}</strong><small>${escapeHtml(profileAccessLabel(profile))}</small></span></div>
-      </aside>
-      <section class="portal-main">
+  app.innerHTML = renderSidebar({
+    nav, activeBase, profile, roleLabels, brandHTML: brand(true), iconFn: icon, profileAccessLabelFn: profileAccessLabel, getInitials: initials, escapeHtmlFn: escapeHtml
+  }) + `
+        <header class="topbar">
         <header class="topbar">
           <button class="icon-btn menu-button" data-open-menu aria-label="Abrir menu">${icon("menu")}</button>
           <div><strong>${title}</strong><small>${subtitle}</small></div>
@@ -3301,9 +3305,54 @@ async function movePipelineItem(itemId, stageId) {
   return true;
 }
 
+window.addEventListener("popstate", () => {
+  if (state.session && state.profile) {
+    resolveRoute(state);
+    renderPortal();
+  }
+});
+
+window.addEventListener("routeChange", () => {
+  if (state.session && state.profile) {
+    resolveRoute(state);
+    renderPortal();
+  }
+});
+
 app.addEventListener("click", async (event) => {
+  const navLink = event.target.closest("a.nav-item");
+  if (navLink) {
+    event.preventDefault();
+    const navId = navLink.getAttribute("data-nav");
+    pushView(navId);
+    app.querySelector(".portal-shell")?.classList.remove("menu-open");
+    return;
+  }
+
+  const groupToggle = event.target.closest(".nav-label-btn");
+  if (groupToggle) {
+    const group = groupToggle.closest(".nav-group");
+    group.classList.toggle("expanded");
+    const isExpanded = group.classList.contains("expanded");
+    groupToggle.setAttribute("aria-expanded", isExpanded);
+    return;
+  }
+
+  const sidebarToggle = event.target.closest(".sidebar-toggle");
+  if (sidebarToggle) {
+    const isCompact = localStorage.getItem("sidebarCompact") === "true";
+    localStorage.setItem("sidebarCompact", !isCompact);
+    renderPortal();
+    return;
+  }
   const target = event.target.closest("button, [data-nav]");
   if (!target) return;
+
+  if (target.hasAttribute("data-nav") && !target.closest(".sidebar")) {
+    event.preventDefault();
+    pushView(target.getAttribute("data-nav"));
+    return;
+  }
 
   if (target.dataset.authMode) return renderLogin(target.dataset.authMode);
   if (target.hasAttribute("data-open-menu")) return document.querySelector(".portal-shell")?.classList.add("menu-open");
@@ -3311,23 +3360,35 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.vacancyTab) {
     state.vacancyTab = target.dataset.vacancyTab;
     state.vacancyStatus = "";
-    return renderView();
+    if (state.vacancyTab === "candidates") pushRoute("/vagas/candidatos");
+    else if (state.vacancyTab === "processes") pushRoute("/vagas/processos-seletivos");
+    else pushRoute("/vagas");
+    return;
   }
   if (target.dataset.documentTab) {
     state.documentTab = target.dataset.documentTab;
-    return renderView();
+    if (state.documentTab === "templates") pushRoute("/documentos/modelos");
+    else pushRoute("/documentos");
+    return;
   }
   if (target.dataset.notificationFilter) {
     state.notificationFilter = target.dataset.notificationFilter;
+    // not routed currently
     return renderView();
   }
   if (target.dataset.automationTab) {
     state.automationTab = target.dataset.automationTab;
-    return renderView();
+    if (state.automationTab === "history") pushRoute("/automacoes/historico");
+    else pushRoute("/automacoes");
+    return;
   }
   if (target.dataset.financeTab) {
     state.financeTab = target.dataset.financeTab;
-    return renderView();
+    if (state.financeTab === "receivable") pushRoute("/faturamento");
+    else if (state.financeTab === "payable") pushRoute("/despesas");
+    else if (state.financeTab === "billets") pushRoute("/boletos");
+    else pushRoute("/financeiro");
+    return;
   }
   if (target.dataset.financeMonthShift) {
     state.financeMonth = shiftFinanceMonth(state.financeMonth, Number(target.dataset.financeMonthShift));

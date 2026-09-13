@@ -1,0 +1,44 @@
+/* Additions for sidebar */
+.sidebar-compact .sidebar {
+  width: 72px; /* Or whatever compact width makes sense */
+}
+.sidebar-compact .brand-container svg,
+.sidebar-compact .brand-container img {
+  max-width: 40px;
+}
+.sidebar-compact .nav-label,
+.sidebar-compact .nav-item span,
+.sidebar-compact .nav-chevron,
+.sidebar-compact .guide-card span,
+.sidebar-compact .user-info {
+  display: none;
+}
+.sidebar-compact .nav-group-content {
+  display: block !important;
+}
+.sidebar-compact .nav-label-btn {
+  display: none;
+}
+.nav-group-content {
+  display: none;
+}
+.nav-group.expanded .nav-group-content {
+  display: block;
+}
+.nav-label-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  color: var(--text-muted); /* use actual variables later */
+}
+.nav-chevron {
+  transition: transform 0.2s;
+}
+.nav-group.expanded .nav-chevron {
+  transform: rotate(180deg);
+}
