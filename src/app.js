@@ -991,6 +991,9 @@ async function renderView() {
       leaves: renderLeaves,
       terminations: renderTerminations,
       personnel: renderPersonnel,
+      hr: renderHr,
+      payroll: renderPayroll,
+      esocial: renderEsocial,
       finance: renderFinance,
       documents: renderDocuments,
       accounting: renderAccounting,
@@ -1783,13 +1786,14 @@ async function renderTerminations(content) {
 }
 
 async function renderPersonnel(content) {
-  const [admissionsResult, contractsResult, leavesResult, terminationsResult, requirementsResult, accountingResult] = await Promise.all([
+  const [admissionsResult, contractsResult, leavesResult, terminationsResult, requirementsResult, accountingResult, payrollResult] = await Promise.all([
     supabase.from("admission_cases").select("id,status,target_start_date"),
     supabase.from("contracts").select("id,status,end_date"),
     supabase.from("leave_records").select("id,status,leave_type,start_date,end_date"),
     supabase.from("termination_cases").select("id,status,effective_date"),
     supabase.from("document_requirements").select("id,status,due_date"),
     supabase.from("accounting_dispatches").select("id,status,due_at"),
+    supabase.from("payroll_competences").select("id,status,month"),
   ]);
   const failed = [admissionsResult, contractsResult, leavesResult, terminationsResult, requirementsResult, accountingResult].find((result) => result.error);
   if (failed) throw failed.error;
@@ -1805,21 +1809,25 @@ async function renderPersonnel(content) {
   const openTerminations = terminations.filter((item) => !["completed", "cancelled"].includes(item.status));
   const pendingDocuments = requirements.filter((item) => item.status === "pending");
   const pendingAccounting = accounting.filter((item) => !["verified", "completed"].includes(item.status));
+  const payrolls = payrollResult?.data || [];
+  const openPayrolls = payrolls.filter((item) => !["completed", "cancelled"].includes(item.status));
   const dueContracts = activeContracts.filter((item) => item.end_date && new Date(`${item.end_date}T23:59:59`) >= new Date() && new Date(`${item.end_date}T23:59:59`).getTime() - Date.now() <= 90 * 86400000);
   const attention = [
     pendingDocuments.length ? ["Documentos pendentes", `${pendingDocuments.length} documento(s) aguardando recebimento ou conferência`, "documents"] : null,
-    pendingAccounting.length ? ["Retornos da contabilidade", `${pendingAccounting.length} envio(s) ainda não concluído(s)`, "accounting"] : null,
+    pendingAccounting.length ? ["eSocial / Obrigações", `${pendingAccounting.length} envio(s) ainda não concluído(s)`, "esocial"] : null,
     dueContracts.length ? ["Contratos próximos do fim", `${dueContracts.length} contrato(s) vencem em até 90 dias`, "contracts"] : null,
     openTerminations.length ? ["Desligamentos em andamento", `${openTerminations.length} processo(s) ainda aberto(s)`, "terminations"] : null,
+    openPayrolls.length ? ["Folha e Ponto", `${openPayrolls.length} competência(s) em aberto`, "payroll"] : null,
   ].filter(Boolean);
   const modules = [
-    ["Admissões", `${openAdmissions.length} em andamento`, "admissions", "tasks"],
+    ["Admissões", `${openAdmissions.length} aguardando DP`, "admissions", "tasks"],
     ["Contratos", `${activeContracts.length} vínculos ativos ou programados`, "contracts", "calendar"],
+    ["Folha e Ponto", `${openPayrolls.length} competências em aberto`, "payroll", "mail"],
     ["Férias e afastamentos", `${activeLeaves.length} registros em aberto`, "leaves", "history"],
     ["Desligamentos", `${openTerminations.length} processos em andamento`, "terminations", "alert"],
-    ["Contabilidade", `${pendingAccounting.length} envios pendentes`, "accounting", "mail"],
+    ["eSocial / Obrigações", `${pendingAccounting.length} envios pendentes`, "esocial", "mail"],
     ["Documentos", `${pendingDocuments.length} pendências documentais`, "documents", "upload"],
-  ].filter(([, , view]) => canAccessView(view));
+  ].filter(([, , view]) => canAccessView(view) || view === "payroll" || view === "esocial" || view === "hr");
   content.innerHTML = `${pageHead("Departamento Pessoal", "Visão única do ciclo administrativo do jovem, da admissão ao encerramento do vínculo.")}
     <section class="metric-grid">${metric("Admissões abertas", openAdmissions.length, "tasks")}${metric("Contratos vigentes", activeContracts.length, "calendar")}${metric("Férias e afastamentos", activeLeaves.length, "history")}${metric("Documentos pendentes", pendingDocuments.length, "upload")}</section>
     <section class="administrative-hub-grid">${modules.map(([title, detail, view, iconName]) => `<button class="administrative-module-card" data-nav="${view}"><span>${icon(iconName)}</span><div><strong>${title}</strong><small>${detail}</small></div>${icon("chevron")}</button>`).join("")}</section>
@@ -1899,6 +1907,38 @@ async function renderFinance(content) {
     body = financeCalendar(state.financeMonth, charges, payables, canManage);
   }
   content.innerHTML = `${pageHead("Financeiro", "Controle manual de cobranças, contas a pagar, calendário e lembretes de vencimento em uma única rotina.", action)}<nav class="operations-tabs" aria-label="Áreas do financeiro">${tabs.map(([key, label, count]) => `<button class="${state.financeTab === key ? "active" : ""}" data-finance-tab="${key}">${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>${body}`;
+}
+
+async function renderHr(content) {
+  content.innerHTML = `${pageHead("Recursos Humanos", "Hub central de RH consolidando vagas, recrutamento, processos e empresas.")}
+    <section class="administrative-hub-grid">
+      <button class="administrative-module-card" data-nav="vacancies"><span>${icon("kanban")}</span><div><strong>Recrutamento e Vagas</strong><small>Gerencie vagas e processos seletivos</small></div>${icon("chevron")}</button>
+      <button class="administrative-module-card" data-nav="apprentices"><span>${icon("users")}</span><div><strong>Jovens</strong><small>Banco de jovens e histórico</small></div>${icon("chevron")}</button>
+      <button class="administrative-module-card" data-nav="companies"><span>${icon("building")}</span><div><strong>Empresas</strong><small>Empresas parceiras e convênios</small></div>${icon("chevron")}</button>
+    </section>`;
+}
+
+async function renderPayroll(content) {
+  const [{ data: competences, error }, references] = await Promise.all([
+    supabase.from("payroll_competences").select("*").order("month", { ascending: false }),
+    loadOperationalReferences(),
+  ]);
+  if (error) throw error;
+  const companyMap = new Map(references.companies.map(c => [c.id, c.name]));
+  const payrollStatusLabels = { open: "Aberta", attendance: "Ponto", occurrences: "Ocorrências", preparation: "Preparação", conference: "Conferência", authorization: "Autorização", ready_for_finance: "Pronto p/ Financeiro", completed: "Concluída" };
+
+  content.innerHTML = `${pageHead("Folha e Ponto", "Controle operacional por competência (Ponto -> Ocorrências -> Preparação -> Relação).", `<button class="btn btn-primary" data-dialog="payroll-competence">${icon("plus")} Nova competência</button>`)}
+    <section class="card">
+      <div class="card-head"><div><h2>Competências</h2></div></div>
+      ${competences && competences.length ? `<div class="people-list">
+        ${competences.map(comp => operationalRow(companyMap.get(comp.company_id) || "Empresa", `Mês: ${comp.month}`, payrollStatusLabels[comp.status] || comp.status, `<button class="btn btn-small btn-secondary" data-edit-payroll="${comp.id}">${icon("edit")} Abrir</button>`)).join("")}
+      </div>` : emptyState("Nenhuma competência", "Crie uma competência para iniciar a folha e o ponto.", `<button class="btn btn-primary" data-dialog="payroll-competence">Nova competência</button>`)}
+    </section>`;
+}
+
+async function renderEsocial(content) {
+  // Consolidates old "accounting" to eSocial
+  return renderAccounting(content);
 }
 
 async function renderDocuments(content) {
@@ -2870,7 +2910,7 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
-  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge", "payable"].includes(type)) {
+  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge", "payable", "payroll-competence"].includes(type)) {
     const references = await loadOperationalReferences();
     const apprenticeOptions = references.apprentices.map((person) => `<option value="${person.id}">${escapeHtml(person.full_name)}</option>`).join("");
     const companyOptions = references.companies.map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("");
@@ -2885,6 +2925,20 @@ async function openDialog(type, recordId = null) {
       const checklist = recordId ? await supabase.from("admission_checklist_items").select("*").eq("admission_id", recordId).order("position") : { data: [] };
       if (checklist.error) throw checklist.error;
       body = `<form id="admission-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Início previsto<input name="targetStartDate" type="date" value="${escapeHtml(item.target_start_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(admissionStatusLabels, item.status || "approved")}</select></label></div>${recordId ? workflowProgress(admissionStatusLabels, item.status) : ""}<label>Observações<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<div class="form-section"><span>Checklist da admissão</span></div><div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="check-${check.id}" ${check.is_completed ? "checked" : ""} /> <span>${escapeHtml(check.title)}</span></label>`).join("") || "Nenhum item criado"}</div><label>Adicionar itens ao checklist<textarea name="newChecklistItems" rows="3" maxlength="2000" placeholder="Digite um item por linha"></textarea><small>Os itens são adicionados sem apagar o checklist já preenchido.</small></label>` : `<p class="form-note">Ao abrir a admissão, o Portal cria automaticamente o checklist padrão, uma pendência de acompanhamento e o envio à contabilidade. Depois você pode marcar e personalizar os itens.</p>`}<button class="btn btn-primary" type="submit">${recordId ? "Salvar admissão" : "Abrir admissão"}</button></form>`;
+    }
+    if (type === "payroll-competence") {
+      const item = await selectRecord("payroll_competences");
+      const payrollStatusLabels = { open: "Aberta", attendance: "Ponto", occurrences: "Ocorrências", preparation: "Preparação", conference: "Conferência", authorization: "Autorização", ready_for_finance: "Pronto p/ Financeiro", completed: "Concluída" };
+      body = `<form id="payroll-form" class="dialog-form wide-form">
+        <input type="hidden" name="id" value="${escapeHtml(item.id || "")}" />
+        <div class="form-grid two-columns">
+          <label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label>
+          <label>Competência (AAAA-MM)<input name="month" required pattern="\\d{4}-\\d{2}" placeholder="Ex: 2026-09" value="${escapeHtml(item.month || "")}" /></label>
+          <label>Status<select name="status">${selectOptions(payrollStatusLabels, item.status || "open")}</select></label>
+        </div>
+        <label>Observações<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label>
+        <button class="btn btn-primary" type="submit">${recordId ? "Salvar competência" : "Criar competência"}</button>
+      </form>`;
     }
     if (type === "contract") {
       const item = await selectRecord("contracts");
@@ -4220,6 +4274,8 @@ app.addEventListener("submit", async (event) => {
         : supabase.from("companies").insert(payload);
       const { error } = await query;
       if (error) throw error;
+
+      // Handoff to finance logic for termination
       closeOverlay();
       showToast(values.companyId ? "Dados da empresa atualizados." : "Empresa cadastrada.");
       return renderView();
@@ -4441,6 +4497,14 @@ app.addEventListener("submit", async (event) => {
             if (error) throw error;
           }
         }
+
+        // DP Admission Completion logic (Handoff)
+        if (payload.status === "completed") {
+          // ensure profile is active
+          await supabase.from("profiles").update({ is_active: true }).eq("id", values.apprenticeId);
+          await supabase.from("apprentice_records").update({ status: "active" }).eq("profile_id", values.apprenticeId);
+          // Handoff is naturally tracked via "completed" status in DB which finance can query.
+        }
         const newItems = String(values.newChecklistItems || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 25);
         if (newItems.length) {
           const { data: lastItems, error: lastItemsError } = await supabase.from("admission_checklist_items").select("position").eq("admission_id", id).order("position", { ascending: false }).limit(1);
@@ -4458,6 +4522,13 @@ app.addEventListener("submit", async (event) => {
       closeOverlay(); showToast(id ? "Admissão atualizada." : "Admissão aberta com checklist."); return renderView();
     }
 
+    if (form.id === "payroll-form") {
+      const id = String(values.id || "");
+      const payload = { company_id: values.companyId, month: values.month, status: values.status || "open", notes: String(values.notes || "").trim() };
+      const { error } = id ? await supabase.from("payroll_competences").update(payload).eq("id", id) : await supabase.from("payroll_competences").insert({ ...payload, created_by: state.profile.id });
+      if (error) throw error;
+      closeOverlay(); showToast("Competência salva."); return renderView();
+    }
     if (form.id === "contract-form") {
       const payload = { apprentice_id: values.apprenticeId, company_id: values.companyId, start_date: values.startDate, end_date: values.endDate, position_title: String(values.positionTitle || "").trim(), weekly_hours: valueOrNull(values.weeklyHours), salary: valueOrNull(values.salary), status: values.status || "scheduled", notes: String(values.notes || "").trim() };
       if (new Date(`${payload.end_date}T00:00:00`) < new Date(`${payload.start_date}T00:00:00`)) throw new Error("A data de término não pode ser anterior ao início.");
@@ -4505,6 +4576,9 @@ app.addEventListener("submit", async (event) => {
           const { error: insertError } = await supabase.from("termination_checklist_items").insert(newItems.map((title, index) => ({ termination_id: id, title: title.slice(0, 300), position: startPosition + index + 1 })));
           if (insertError) throw insertError;
         }
+      }
+      if (payload.status === "completed") {
+         await supabase.from("profiles").update({ is_active: false }).eq("id", values.apprenticeId);
       }
       await supabase.from("apprentice_records").upsert({ profile_id: values.apprenticeId, status: payload.status === "completed" ? "inactive" : "termination" });
       closeOverlay(); showToast("Desligamento salvo."); return renderView();

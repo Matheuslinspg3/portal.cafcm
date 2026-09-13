@@ -32,7 +32,9 @@ export const routeMap = {
 
   // Administrativo
   "/dp": { view: "personnel", title: "Departamento Pessoal" },
-  "/rh": { view: "hr", title: "Recursos Humanos" }, // Aliases/Preparatory
+  "/rh": { view: "hr", title: "Recursos Humanos" },
+  "/folha": { view: "payroll", title: "Folha e Ponto" },
+  "/esocial": { view: "esocial", title: "eSocial / Obrigações" },
 
   "/financeiro": { view: "finance", title: "Financeiro", tab: "receivable" },
   "/faturamento": { view: "finance", title: "Faturamento", tab: "receivable" },
@@ -72,6 +74,9 @@ export const viewToUrl = {
   "courses": "/cursos",
   "enrollments": "/matriculas",
   "personnel": "/dp",
+  "hr": "/rh",
+  "payroll": "/folha",
+  "esocial": "/esocial",
   "finance": "/financeiro",
   "documents": "/documentos",
   "accounting": "/contabilidade",

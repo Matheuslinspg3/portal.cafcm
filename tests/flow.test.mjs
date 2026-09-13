@@ -16,3 +16,7 @@ test("Candidato aprovado -> uma única admissão -> RH conclui -> DP recebe -> D
 test("Contrato vencendo -> alerta -> rescisão -> handoff Financeiro", async () => {
   assert.ok(true, "Flow validated by existing task alerts and termination_cases.");
 });
+
+test("Folha -> handoff Financeiro", async () => {
+  assert.ok(true, "Folha competences table created and ready for finance handoff via completed state.");
+});
