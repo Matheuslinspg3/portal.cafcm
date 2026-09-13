@@ -4372,9 +4372,12 @@ app.addEventListener("submit", async (event) => {
       const result = await callAdmin({ action: "convert_candidate", applicationId: values.applicationId, targetStartDate: values.targetStartDate || null }, true);
       closeOverlay();
       showToast(result.alreadyConverted ? "A admissão deste jovem já estava aberta." : result.invited ? "Jovem criado, convite enviado e admissão aberta." : "Jovem vinculado e admissão aberta.");
-      state.view = canAccessView("admissions") ? "admissions" : "vacancies";
-      state.vacancyTab = "applications";
-      return renderPortal();
+      if (canAccessView("admissions")) {
+        pushRoute("/admissoes");
+      } else {
+        pushRoute("/vagas/processos-seletivos");
+      }
+      return;
     }
 
     if (form.id === "pipeline-item-form") {
