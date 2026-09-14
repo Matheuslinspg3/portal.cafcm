@@ -141,7 +141,7 @@ const admissionStatusLabels = {
   medical_exam: "Exame admissional",
   contract_preparation: "Contrato em elaboração",
   signatures_pending: "Aguardando assinaturas",
-  accounting: "Contabilidade / eSocial",
+  accounting: "eSocial / Obrigações",
   enrollment: "Matrícula / curso",
   completed: "Admissão concluída",
   cancelled: "Cancelada",
@@ -378,37 +378,57 @@ const auditActionLabels = {
 
 const navigation = {
   cafcm_admin: [
-    { label: "Painel", items: [["overview", "Visão geral", "grid"], ["indicators", "Indicadores e relatórios", "history"]] },
+    { label: "Painel", items: [["overview", "Visão Geral", "grid", { route: "/visao-geral" }]] },
     { label: "Operações", items: [
       ["pipelines", "Central de Esteiras", "kanban"],
       ["tasks", "Tarefas e Pendências", "tasks"],
       ["notifications", "Notificações", "bell"],
-      ["automations", "Automações", "clock"],
     ] },
-    { label: "Gestão de vagas", items: [
-      ["vacancies", "Vagas e candidatos", "kanban"],
-      ["partnerships", "Parcerias e jovens", "building"],
+    { label: "Empresas", items: [
+      ["companies", "Empresas", "building"],
+      ["partnerships", "Parcerias / Convênios", "link"],
     ] },
-    { label: "Empresas", items: [["companies", "Empresas parceiras", "building"]] },
     { label: "Jovens", items: [
       ["apprentices", "Jovens / Aprendizes", "users"],
+    ] },
+    { label: "Recursos Humanos", items: [
+      ["overview", "Visão Geral", "grid", { route: "/rh" }],
+      ["vacancies", "Vagas", "kanban", { route: "/vagas" }],
+      ["vacancies", "Candidatos", "users", { route: "/vagas/candidatos" }],
+      ["vacancies", "Processos Seletivos", "tasks", { route: "/vagas/processos-seletivos" }],
+    ] },
+    { label: "Departamento Pessoal", items: [
+      ["personnel", "Visão Geral", "users", { route: "/dp" }],
       ["admissions", "Admissões", "tasks"],
       ["contracts", "Contratos", "calendar"],
-      ["leaves", "Férias e afastamentos", "history"],
-      ["terminations", "Desligamentos", "alert"],
+      ["personnel", "Folha e Ponto", "clock", { route: "/folha" }],
+      ["leaves", "Férias e Afastamentos", "history"],
+      ["terminations", "Rescisões", "alert"],
+      ["accounting", "eSocial / Obrigações", "mail", { route: "/esocial" }],
     ] },
-    { label: "Acadêmico", items: [
+    { label: "Financeiro", items: [
+      ["finance", "Visão Geral", "grid", { route: "/financeiro" }],
+      ["finance", "Faturamento", "calendar", { route: "/faturamento", children: [
+        ["finance", "Lançamentos", "history", { route: "/faturamento", active: false }],
+        ["finance", "Recorrências", "clock", { route: "/faturamento", active: false }],
+        ["finance", "Geração em lote", "copy", { route: "/faturamento", active: false }],
+        ["finance", "Regras", "tasks", { route: "/faturamento", active: false }],
+        ["finance", "Histórico", "history", { route: "/faturamento", active: false }],
+      ] }],
+      ["finance", "Despesas", "arrow", { route: "/despesas" }],
+      ["finance", "Boletos e Recebimentos", "download", { route: "/boletos" }],
+    ] },
+    { label: "Documentos", items: [["documents", "Documentos", "upload"]] },
+    { label: "Pedagógico", items: [
       ["courses", "Cursos", "book"],
       ["enrollments", "Matrículas", "link"],
     ] },
-    { label: "Administrativo", items: [
-      ["personnel", "Departamento Pessoal", "users"],
-      ["finance", "Financeiro", "calendar"],
-      ["documents", "Documentos", "upload"],
-      ["accounting", "Contabilidade", "mail"],
-      ["procedures", "Procedimentos", "tasks"],
+    { label: "Gestão", items: [
       ["people", "Pessoas e Convites", "users"],
+      ["indicators", "Indicadores e Relatórios", "history"],
       ["audit", "Auditoria", "history"],
+      ["procedures", "Procedimentos", "tasks"],
+      ["automations", "Automações", "clock"],
     ] },
   ],
   apprentice: [
@@ -651,7 +671,7 @@ function viewTitle(view) {
     personnel: ["Departamento Pessoal", "Ciclo administrativo dos jovens"],
     finance: ["Financeiro", "Cobranças, boletos e recebimentos"],
     documents: ["Documentos", "Arquivo digital privado da CAFCM"],
-    accounting: ["Contabilidade", "Envios, retornos e conferência"],
+    accounting: ["eSocial / Obrigações", "Envios, retornos e conferência"],
     procedures: ["Procedimentos", "Processos, responsáveis e prazos"],
     people: ["Pessoas e convites", "Acessos criados pela CAFCM"],
     courses: ["Cursos", "Formações, aulas e atividades"],
@@ -953,7 +973,7 @@ async function renderPortal() {
   }
 
   app.innerHTML = renderSidebar({
-    nav, activeBase, profile, roleLabels, brandHTML: brand(true), iconFn: icon, profileAccessLabelFn: profileAccessLabel, getInitials: initials, escapeHtmlFn: escapeHtml
+    nav, activeBase, activePath: window.location.pathname, profile, roleLabels, brandHTML: brand(true), iconFn: icon, profileAccessLabelFn: profileAccessLabel, getInitials: initials, escapeHtmlFn: escapeHtml
   }) + `
         <header class="topbar">
           <button class="icon-btn menu-button" data-open-menu aria-label="Abrir menu">${icon("menu")}</button>
@@ -1851,7 +1871,7 @@ async function renderPersonnel(content) {
     ["Contratos", `${activeContracts.length} vínculos ativos ou programados`, "contracts", "calendar"],
     ["Férias e afastamentos", `${activeLeaves.length} registros em aberto`, "leaves", "history"],
     ["Desligamentos", `${openTerminations.length} processos em andamento`, "terminations", "alert"],
-    ["Contabilidade", `${pendingAccounting.length} envios pendentes`, "accounting", "mail"],
+    ["eSocial / Obrigações", `${pendingAccounting.length} envios pendentes`, "accounting", "mail"],
     ["Documentos", `${pendingDocuments.length} pendências documentais`, "documents", "upload"],
   ].filter(([, , view]) => canAccessView(view));
   content.innerHTML = `${pageHead("Departamento Pessoal", "Visão única do ciclo administrativo do jovem, da admissão ao encerramento do vínculo.")}
@@ -1991,7 +2011,7 @@ async function renderAccounting(content) {
   const responsibleMap = new Map(references.administrators.map((item) => [item.id, item.full_name]));
   const canManage = hasPermission("finance.manage");
   const open = (records || []).filter((item) => !["verified", "completed"].includes(item.status));
-  content.innerHTML = `${pageHead("Contabilidade", "Registre o envio, o retorno e a conferência de cada solicitação contábil.", canManage ? `<button class="btn btn-primary" data-dialog="accounting">${icon("plus")} Novo envio</button>` : "")}
+  content.innerHTML = `${pageHead("eSocial / Obrigações", "Registre o envio, o retorno e a conferência de cada obrigação.", canManage ? `<button class="btn btn-primary" data-dialog="accounting">${icon("plus")} Novo envio</button>` : "")}
     <section class="metric-grid">${metric("Em preparação", (records || []).filter((item) => ["pending", "preparing"].includes(item.status)).length, "tasks")}${metric("Aguardando retorno", (records || []).filter((item) => ["sent", "waiting_response"].includes(item.status)).length, "clock")}${metric("Recebidos", (records || []).filter((item) => item.status === "received").length, "mail")}${metric("Conferidos", (records || []).filter((item) => ["verified", "completed"].includes(item.status)).length, "check")}</section>
     <section class="card"><div class="people-list">${(records || []).length ? records.map((item) => {
       const relations = [apprenticeMap.get(item.apprentice_id), companyMap.get(item.company_id), item.competence ? formatMonth(item.competence) : null, responsibleMap.get(item.responsible_id) ? `responsável ${responsibleMap.get(item.responsible_id)}` : null, item.due_at ? `prazo ${formatDate(item.due_at, true)}` : null].filter(Boolean).join(" · ") || "Sem vínculo informado";
@@ -3379,7 +3399,9 @@ app.addEventListener("click", async (event) => {
   if (navLink) {
     event.preventDefault();
     const navId = navLink.getAttribute("data-nav");
-    pushView(navId);
+    const navRoute = navLink.getAttribute("data-route");
+    if (navRoute && navRoute !== "#") pushRoute(navRoute);
+    else pushView(navId);
     app.querySelector(".portal-shell")?.classList.remove("menu-open");
     return;
   }

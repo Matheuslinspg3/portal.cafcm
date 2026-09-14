@@ -2427,3 +2427,71 @@ input:focus, select:focus, textarea:focus {
   .page-head h1, .editor-head h1, .student-course-head h1 { font-size: 1.75rem; }
   .topbar .help-topbar { min-height: 40px; padding-inline: 12px; }
 }
+
+/* Final frame guardrails: every screen stays inside the viewport. */
+html,
+body { max-width: 100%; overflow-x: hidden; }
+.portal-shell,
+.portal-main,
+.topbar,
+.content,
+.page-head,
+.card,
+.metric,
+.filter-bar,
+.people-list,
+.person-row { min-width: 0; max-width: 100%; }
+.content { overflow-x: hidden; }
+.page-head > div,
+.card-head > div,
+.person-main,
+.person-access,
+.person-actions,
+.finance-amount { min-width: 0; }
+.page-head h1,
+.page-head p,
+.card-head h2,
+.person-row strong,
+.person-row small,
+.person-main { overflow-wrap: anywhere; }
+.filter-bar { overflow: hidden; }
+.search-field { min-width: min(250px, 100%); }
+.operations-tabs { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.finance-row { grid-template-columns: auto minmax(0, 1fr) minmax(100px, auto) minmax(110px, auto) minmax(0, auto); }
+.finance-row .person-actions { min-width: 0; }
+
+/* Sidebar hierarchy, including the Financeiro > Faturamento sub-navigation. */
+.nav-subitems {
+  display: grid;
+  gap: 2px;
+  margin: 1px 0 3px 22px;
+  padding-left: 9px;
+  border-left: 1px solid rgba(255,255,255,.18);
+}
+.nav-subitem {
+  min-height: 34px;
+  padding: 0 9px;
+  color: rgba(255,255,255,.66);
+  font-size: .75rem;
+  font-weight: 650;
+}
+.nav-subitem .icon { width: 15px; height: 15px; opacity: .8; }
+.nav-subitem:hover { color: #fff; background: rgba(255,255,255,.1); transform: none; }
+.nav-subitem.active { color: var(--navy-2); background: #fff; }
+.sidebar-compact .nav-subitems { display: none; }
+
+@media (max-width: 1120px) {
+  .finance-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+}
+
+@media (max-width: 760px) {
+  .page-head,
+  .card-head { align-items: stretch; }
+  .page-head > *,
+  .card-head > * { max-width: 100%; }
+  .finance-row { grid-template-columns: auto minmax(0, 1fr); }
+  .finance-row .finance-amount,
+  .finance-row .person-access,
+  .finance-row .person-actions { grid-column: 2; }
+  .search-field { min-width: 0; }
+}

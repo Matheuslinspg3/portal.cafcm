@@ -1,7 +1,29 @@
 import { viewToUrl } from "../router/routes.mjs";
 
-export function renderSidebar({ nav, activeBase, profile, roleLabels, brandHTML, iconFn, profileAccessLabelFn, getInitials, escapeHtmlFn }) {
+export function renderSidebar({ nav, activeBase, activePath = "", profile, roleLabels, brandHTML, iconFn, profileAccessLabelFn, getInitials, escapeHtmlFn }) {
   const isCompact = localStorage.getItem("sidebarCompact") === "true";
+
+  const itemMeta = (item) => item[3] || {};
+  const itemRoute = (item) => itemMeta(item).route || viewToUrl[item[0]] || "#";
+  const itemIsActive = (item) => {
+    const meta = itemMeta(item);
+    if (meta.active === false || activeBase !== item[0]) return false;
+    return !meta.route || !activePath || activePath === meta.route;
+  };
+  const groupHasActiveItem = (items = []) => items.some((item) => itemIsActive(item) || groupHasActiveItem(itemMeta(item).children));
+  const renderItem = (item, nested = false) => {
+    const [id, label, iconName] = item;
+    const meta = itemMeta(item);
+    const url = itemRoute(item);
+    const isActive = itemIsActive(item);
+    const children = meta.children || [];
+    return `
+      <a href="${url}" class="nav-item ${nested ? "nav-subitem" : ""} ${isActive ? "active" : ""}" data-nav="${id}" data-route="${url}" ${isActive ? 'aria-current="page"' : ''} title="${isCompact ? escapeHtmlFn(label) : ''}">
+        ${iconFn(iconName)}<span>${escapeHtmlFn(label)}</span>
+      </a>
+      ${children.length ? `<div class="nav-subitems">${children.map((child) => renderItem(child, true)).join("")}</div>` : ""}
+    `;
+  };
 
   return `
     <div class="portal-shell ${isCompact ? 'sidebar-compact' : ''}">
@@ -18,7 +40,7 @@ export function renderSidebar({ nav, activeBase, profile, roleLabels, brandHTML,
         </div>
         <nav aria-label="Navegação principal">
           ${nav.map((group, groupIdx) => {
-            const hasActiveItem = group.items.some(([id]) => id === activeBase);
+            const hasActiveItem = groupHasActiveItem(group.items);
             const isExpanded = hasActiveItem; // Automatically expand group with active item
             return `
               <section class="nav-group ${isExpanded ? 'expanded' : ''}" data-group="${groupIdx}">
@@ -27,15 +49,7 @@ export function renderSidebar({ nav, activeBase, profile, roleLabels, brandHTML,
                   <span class="nav-chevron">${iconFn("chevron")}</span>
                 </button>
                 <div class="nav-group-content" id="group-content-${groupIdx}">
-                  ${group.items.map(([id, label, iconName]) => {
-                    const isActive = activeBase === id;
-                    const url = viewToUrl[id] || "#";
-                    return `
-                      <a href="${url}" class="nav-item ${isActive ? "active" : ""}" data-nav="${id}" ${isActive ? 'aria-current="page"' : ''} title="${isCompact ? escapeHtmlFn(label) : ''}">
-                        ${iconFn(iconName)}<span>${escapeHtmlFn(label)}</span>
-                      </a>
-                    `;
-                  }).join("")}
+                  ${group.items.map((item) => renderItem(item)).join("")}
                 </div>
               </section>
             `;

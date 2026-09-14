@@ -6,6 +6,10 @@ import { resolveRoute } from "../src/router/router.mjs";
 test("route map properly defines routes and tabs", () => {
   assert.ok(routeMap["/"]);
   assert.equal(routeMap["/"].view, "overview");
+  assert.equal(routeMap["/visao-geral"].view, "overview");
+  assert.equal(routeMap["/rh"].view, "overview");
+  assert.equal(routeMap["/folha"].view, "personnel");
+  assert.equal(routeMap["/esocial"].view, "accounting");
 
   assert.ok(routeMap["/faturamento"]);
   assert.equal(routeMap["/faturamento"].view, "finance");

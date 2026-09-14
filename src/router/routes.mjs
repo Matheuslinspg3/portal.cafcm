@@ -10,7 +10,7 @@ export const routeMap = {
   "/automacoes": { view: "automations", title: "Automações", tab: "overview" },
   "/automacoes/historico": { view: "automations", title: "Automações - Histórico", tab: "history" },
 
-  // Gestão de Vagas
+  // Recursos Humanos
   "/vagas": { view: "vacancies", title: "Vagas e candidatos", tab: "overview" },
   "/vagas/candidatos": { view: "vacancies", title: "Vagas - Candidatos", tab: "candidates" },
   "/vagas/processos-seletivos": { view: "vacancies", title: "Vagas - Processos Seletivos", tab: "processes" },
@@ -26,13 +26,16 @@ export const routeMap = {
   "/ferias-afastamentos": { view: "leaves", title: "Férias e afastamentos" },
   "/rescisoes": { view: "terminations", title: "Desligamentos" },
 
-  // Acadêmico / Pedagógico
+  // Pedagógico
   "/cursos": { view: "courses", title: "Cursos" },
   "/matriculas": { view: "enrollments", title: "Matrículas" },
 
-  // Administrativo
+  // Departamento Pessoal, Financeiro e Gestão
   "/dp": { view: "personnel", title: "Departamento Pessoal" },
-  "/rh": { view: "hr", title: "Recursos Humanos" }, // Aliases/Preparatory
+  // Recursos Humanos / Departamento Pessoal friendly aliases reuse existing views.
+  "/rh": { view: "overview", title: "Recursos Humanos" },
+  "/folha": { view: "personnel", title: "Folha e Ponto" },
+  "/esocial": { view: "accounting", title: "eSocial / Obrigações" },
 
   "/financeiro": { view: "finance", title: "Financeiro", tab: "receivable" },
   "/faturamento": { view: "finance", title: "Faturamento", tab: "receivable" },
@@ -42,7 +45,7 @@ export const routeMap = {
   "/documentos": { view: "documents", title: "Documentos", tab: "files" },
   "/documentos/modelos": { view: "documents", title: "Modelos de Documentos", tab: "templates" },
 
-  "/contabilidade": { view: "accounting", title: "Contabilidade" },
+  "/contabilidade": { view: "accounting", title: "eSocial / Obrigações" },
   "/procedimentos": { view: "procedures", title: "Procedimentos" },
   "/pessoas": { view: "people", title: "Pessoas e Convites" },
   "/auditoria": { view: "audit", title: "Auditoria" },
