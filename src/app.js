@@ -1,4430 +1,205 @@
-import { renderSidebar } from "./navigation/sidebar.mjs";
-import { resolveRoute, pushRoute, pushView, replaceRoute } from "./router/router.mjs";
-
-import { createClient } from "@supabase/supabase-js";
-import { getPageGuide } from "./guides/catalog.mjs";
-import { createPageTour } from "./guides/tour.mjs";
-import { buildFormGuide } from "./guides/forms.mjs";
-
-const SUPABASE_URL = "https://cyovnmnxzrfptyfrivdr.supabase.co";
-const SUPABASE_KEY = "sb_publishable_otxl6dKO3VJ4G3qsNkfyoA_cP_EY6Lg";
-const SITE_ORIGIN = window.location.origin;
-const ADMIN_FUNCTION = `${SUPABASE_URL}/functions/v1/portal-admin`;
-const AUTOMATION_FUNCTION = `${SUPABASE_URL}/functions/v1/portal-automation`;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
-
-const app = document.querySelector("#app");
-
-const state = {
-  session: null,
-  profile: null,
-  view: null,
-  selectedCourseId: null,
-  selectedLessonId: null,
-  lessonStepIndex: 0,
-  blockSlideIndex: 0,
-  selectedActivityId: null,
-  auditPersonId: null,
-  sessionLogged: false,
-  wizardOpen: false,
-  setupRequired: false,
-  people: [],
-  importResults: [],
-  selectedPipelineId: null,
-  pipelineSearch: "",
-  pipelinePriority: "",
-  pipelineResponsible: "",
-  pipelineCompany: "",
-  pipelineSort: "recent",
-  taskFilter: "mine",
-  notificationUnreadCount: 0,
-  notificationFilter: "open",
-  draggedPipelineItemId: null,
-  vacancyTab: "overview",
-  vacancySearch: "",
-  vacancyStatus: "",
-  vacancyCompany: "",
-  financeSearch: "",
-  financeStatus: "",
-  financeCompany: "",
-  financeTab: "receivable",
-  financeMonth: new Date().toISOString().slice(0, 7),
-  payableStatus: "",
-  documentTab: "files",
-  documentSearch: "",
-  documentCategory: "",
-  automationTab: "overview",
-  indicatorStart: "",
-  indicatorEnd: "",
-  indicatorGroup: "all",
-};
-
-const pageTour = createPageTour({
-  onStop: (reason) => {
-    state.wizardOpen = false;
-    if (reason === "completed") showToast("Guia concluÃ­do. Use Como usar para revÃª-lo nesta aba.");
-  },
-  onAction: async (action) => {
-    try { if (action.dialog) await openDialog(action.dialog); }
-    catch (error) { showToast(friendlyError(error), "error"); }
-  },
-});
-
-const roleLabels = {
-  cafcm_admin: "Equipe CAFCM",
-  apprentice: "Jovem aprendiz",
-  company: "Representante da empresa",
-};
-
-const departmentLabels = {
-  management: "DireÃ§Ã£o e AdministraÃ§Ã£o",
-  vacancies: "GestÃ£o de Vagas",
-  coordination: "CoordenaÃ§Ã£o",
-  personnel: "Departamento Pessoal",
-  hr: "Recursos Humanos",
-  finance: "Financeiro",
-};
-
-const departmentPermissions = {
-  management: ["*"],
-  vacancies: ["directory.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "reports.read", "reports.export"],
-  coordination: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "academic.read", "academic.manage", "reports.read", "reports.export"],
-  personnel: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "personnel.read", "personnel.manage", "contracts.read", "contracts.manage", "documents.read", "documents.manage", "finance.read", "finance.manage", "reports.read", "reports.export"],
-  hr: ["directory.read", "apprentice.history.read", "operations.read", "operations.manage", "companies.read", "companies.manage", "vacancies.read", "vacancies.manage", "people.read", "people.manage", "audit.read", "reports.read", "reports.export"],
-  finance: ["directory.read", "operations.read", "operations.manage", "companies.read", "contracts.read", "documents.read", "documents.manage", "finance.read", "finance.manage", "reports.read", "reports.export"],
-};
-
-const candidateStatusLabels = {
-  new: "Novo",
-  screening: "Em triagem",
-  interview: "Em entrevistas",
-  approved: "Aprovado",
-  rejected: "NÃ£o aprovado",
-  hired: "Convertido em jovem",
-  archived: "Arquivado",
-};
-
-const vacancyStatusLabels = {
-  draft: "Rascunho",
-  open: "Aberta",
-  paused: "Pausada",
-  filled: "Preenchida",
-  cancelled: "Cancelada",
-};
-
-const applicationStatusLabels = {
-  received: "Candidato recebido",
-  screening: "Triagem",
-  cafcm_interview: "Entrevista CAFCM",
-  referred_company: "Encaminhado Ã  empresa",
-  company_interview: "Entrevista na empresa",
-  waiting_return: "Aguardando retorno",
-  approved: "Aprovado",
-  talent_pool: "Banco de talentos",
-  rejected: "NÃ£o aprovado",
-  withdrawn: "Desistente",
-  hired: "AdmissÃ£o iniciada",
-};
-
-const admissionStatusLabels = {
-  approved: "Aprovado",
-  documents_pending: "Documentos pendentes",
-  documents_complete: "Documentos completos",
-  medical_exam: "Exame admissional",
-  contract_preparation: "Contrato em elaboraÃ§Ã£o",
-  signatures_pending: "Aguardando assinaturas",
-  accounting: "Contabilidade / eSocial",
-  enrollment: "MatrÃ­cula / curso",
-  completed: "AdmissÃ£o concluÃ­da",
-  cancelled: "Cancelada",
-};
-
-const terminationStatusLabels = {
-  request: "SolicitaÃ§Ã£o",
-  analysis: "AnÃ¡lise",
-  medical_exam: "Exame demissional",
-  documentation: "DocumentaÃ§Ã£o",
-  accounting: "Contabilidade",
-  termination: "RescisÃ£o",
-  finance: "Financeiro",
-  documents_delivered: "Documentos entregues",
-  completed: "ConcluÃ­do",
-  cancelled: "Cancelado",
-};
-
-const leaveTypeLabels = {
-  vacation: "FÃ©rias",
-  medical_leave: "Afastamento mÃ©dico",
-  other_leave: "Outro afastamento",
-};
-
-const leaveStatusLabels = {
-  planned: "Planejado",
-  approved: "Aprovado",
-  in_progress: "Em andamento",
-  completed: "ConcluÃ­do",
-  cancelled: "Cancelado",
-};
-
-const accountingStatusLabels = {
-  pending: "Pendente",
-  preparing: "Em preparaÃ§Ã£o",
-  sent: "Enviado",
-  waiting_response: "Aguardando retorno",
-  received: "Recebido",
-  verified: "Conferido",
-  completed: "ConcluÃ­do",
-};
-
-const financialStatusLabels = {
-  to_invoice: "A faturar",
-  invoice_issued: "NF emitida",
-  payment_slip_issued: "Boleto emitido",
-  sent: "Enviado",
-  to_due: "A vencer",
-  overdue: "Vencido",
-  collection: "Em cobranÃ§a",
-  paid: "Pago",
-  cancelled: "Cancelado",
-};
-
-const payableStatusLabels = {
-  pending: "Aguardando aprovaÃ§Ã£o",
-  approved: "Aprovada",
-  scheduled: "Programada",
-  paid: "Paga",
-  cancelled: "Cancelada",
-};
-
-const documentCategoryLabels = {
-  admission: "AdmissÃ£o",
-  contract: "Contrato",
-  documents: "DocumentaÃ§Ã£o geral",
-  vacation: "FÃ©rias",
-  leave: "Afastamento",
-  termination: "Desligamento",
-  accounting: "Contabilidade",
-  finance: "Financeiro",
-  payroll: "Folha de pagamento",
-  registration_change: "AlteraÃ§Ã£o cadastral",
-  invoice: "Nota fiscal",
-  payment_slip: "Boleto",
-  receipt: "Comprovante",
-  other: "Outro",
-};
-
-const documentRequirementStatusLabels = {
-  pending: "Pendente",
-  received: "Recebido",
-  verified: "Conferido",
-  waived: "Dispensado",
-};
-
-const viewPermissions = {
-  overview: "operations.read",
-  pipelines: "operations.read",
-  tasks: "operations.read",
-  notifications: "operations.read",
-  automations: "operations.read",
-  vacancies: "vacancies.read",
-  partnerships: "vacancies.read",
-  companies: "companies.read",
-  apprentices: "directory.read",
-  admissions: "personnel.read",
-  contracts: "contracts.read",
-  leaves: "personnel.read",
-  terminations: "personnel.read",
-  personnel: "personnel.read",
-  finance: "finance.read",
-  courses: "academic.read",
-  "course-editor": "academic.read",
-  "lesson-editor": "academic.read",
-  enrollments: "academic.read",
-  documents: "documents.read",
-  accounting: "finance.read",
-  procedures: "operations.read",
-  people: "people.read",
-  audit: "audit.read",
-  indicators: "reports.read",
-};
-
-function profileDepartment(profile = state.profile) {
-  return profile?.role === "cafcm_admin" ? profile.department || "management" : null;
-}
-
-function hasPermission(permission, profile = state.profile) {
-  if (profile?.role !== "cafcm_admin") return false;
-  const permissions = departmentPermissions[profileDepartment(profile)] || [];
-  return permissions.includes("*") || permissions.includes(permission);
-}
-
-function profileAccessLabel(profile = state.profile) {
-  if (profile?.role !== "cafcm_admin") return roleLabels[profile?.role] || "Acesso";
-  return departmentLabels[profileDepartment(profile)] || roleLabels.cafcm_admin;
-}
-
-function departmentOptions(selected = "management") {
-  return Object.entries(departmentLabels)
-    .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`)
-    .join("");
-}
-
-function canManagePerson(person) {
-  if (!hasPermission("people.manage")) return false;
-  return person?.role !== "cafcm_admin" || profileDepartment() === "management";
-}
-
-const blockTypeLabels = {
-  text: "Texto e imagem",
-  slides: "ApresentaÃ§Ã£o em slides",
-  video: "VÃ­deo",
-  considerations: "ConsideraÃ§Ãµes finais",
-};
-
-const auditActionLabels = {
-  "user.invited": "Pessoa convidada",
-  "user.updated": "Perfil ou credencial alterada",
-  "user.recovery_sent": "RecuperaÃ§Ã£o de senha enviada",
-  "user.invite_resent": "Convite reenviado",
-  "user.access_archived": "Acesso excluÃ­do e arquivado",
-  "user.access_restored": "Acesso restaurado",
-  "user.import_invited": "Pessoa convidada por importaÃ§Ã£o",
-  "user.import_updated": "Perfil atualizado por importaÃ§Ã£o",
-  "people.imported": "ImportaÃ§Ã£o de pessoas",
-  "session.started": "Entrada no portal",
-  "session.ended": "SaÃ­da do portal",
-  "course.opened": "Curso aberto",
-  "lesson.opened": "Aula aberta",
-  "profile.password_changed": "Senha pessoal alterada",
-  "companies.insert": "Empresa cadastrada",
-  "companies.update": "Empresa alterada",
-  "companies.delete": "Empresa excluÃ­da",
-  "candidates.insert": "Candidato cadastrado",
-  "candidates.update": "Candidato atualizado",
-  "candidates.delete": "Candidato excluÃ­do",
-  "job_vacancies.insert": "Vaga criada",
-  "job_vacancies.update": "Vaga atualizada",
-  "job_vacancies.delete": "Vaga excluÃ­da",
-  "vacancy_applications.insert": "SeleÃ§Ã£o iniciada",
-  "vacancy_applications.update": "Etapa da seleÃ§Ã£o atualizada",
-  "vacancy_applications.delete": "SeleÃ§Ã£o excluÃ­da",
-  "partnership_agreements.insert": "Parceria cadastrada",
-  "partnership_agreements.update": "Parceria atualizada",
-  "partnership_agreements.delete": "Parceria excluÃ­da",
-  "candidate_documents.insert": "Documento de candidato enviado",
-  "candidate.converted": "Candidato convertido em jovem",
-  "financial_charges.insert": "CobranÃ§a criada",
-  "financial_charges.update": "CobranÃ§a atualizada",
-  "financial_charges.delete": "CobranÃ§a excluÃ­da",
-  "accounts_payable.insert": "Conta a pagar criada",
-  "accounts_payable.update": "Conta a pagar atualizada",
-  "accounts_payable.delete": "Conta a pagar excluÃ­da",
-  "document_requirements.insert": "PendÃªncia documental criada",
-  "document_requirements.update": "PendÃªncia documental atualizada",
-  "document_requirements.delete": "PendÃªncia documental excluÃ­da",
-  "termination_checklist_items.insert": "Item de desligamento criado",
-  "termination_checklist_items.update": "Checklist de desligamento atualizado",
-  "termination_checklist_items.delete": "Item de desligamento excluÃ­do",
-  "document_records.update": "Documento atualizado",
-  "leave_records.insert": "FÃ©rias ou afastamento registrado",
-  "leave_records.update": "FÃ©rias ou afastamento atualizado",
-  "termination_cases.insert": "Desligamento aberto",
-  "termination_cases.update": "Desligamento atualizado",
-  "accounting_dispatches.insert": "Envio Ã  contabilidade criado",
-  "accounting_dispatches.update": "Envio Ã  contabilidade atualizado",
-  "profiles.update": "Perfil alterado",
-  "courses.insert": "Curso criado",
-  "courses.update": "Curso alterado",
-  "courses.delete": "Curso excluÃ­do",
-  "lessons.insert": "Aula criada",
-  "lessons.update": "Aula alterada",
-  "lessons.delete": "Aula excluÃ­da",
-  "lesson_blocks.insert": "Linha de aprendizagem criada",
-  "lesson_blocks.update": "Linha de aprendizagem alterada",
-  "lesson_blocks.delete": "Linha de aprendizagem excluÃ­da",
-  "activities.insert": "Atividade criada",
-  "activities.update": "Atividade alterada",
-  "activities.delete": "Atividade excluÃ­da",
-  "enrollments.insert": "MatrÃ­cula criada",
-  "enrollments.delete": "MatrÃ­cula removida",
-  "lesson_progress.insert": "Aula concluÃ­da",
-  "lesson_progress.delete": "ConclusÃ£o de aula desmarcada",
-  "activity_attempts.insert": "Atividade enviada",
-  "activity_attempts.update": "Atividade atualizada",
-  "activity_responses.insert": "Resposta registrada",
-  "activity_responses.update": "Resposta alterada",
-  "pipelines.insert": "Esteira criada",
-  "pipelines.update": "Esteira alterada",
-  "pipeline_stages.insert": "Etapa criada",
-  "pipeline_stages.update": "Etapa alterada",
-  "pipeline_items.insert": "Processo criado",
-  "pipeline_items.update": "Processo alterado ou movimentado",
-  "pipeline_items.delete": "Processo excluÃ­do",
-  "tasks.insert": "Tarefa criada",
-  "tasks.update": "Tarefa alterada",
-  "tasks.delete": "Tarefa excluÃ­da",
-  "task_checklist_items.insert": "Item de checklist criado",
-  "task_checklist_items.update": "Checklist de tarefa atualizado",
-  "task_checklist_items.delete": "Item de checklist excluÃ­do",
-};
-
-const navigation = {
-  cafcm_admin: [
-    { label: "Painel", items: [["overview", "VisÃ£o geral", "grid"], ["indicators", "Indicadores e relatÃ³rios", "history"]] },
-    { label: "OperaÃ§Ãµes", items: [
-      ["pipelines", "Central de Esteiras", "kanban"],
-      ["tasks", "Tarefas e PendÃªncias", "tasks"],
-      ["notifications", "NotificaÃ§Ãµes", "bell"],
-      ["automations", "AutomaÃ§Ãµes", "clock"],
-    ] },
-    { label: "GestÃ£o de vagas", items: [
-      ["vacancies", "Vagas e candidatos", "kanban"],
-      ["partnerships", "Parcerias e jovens", "building"],
-    ] },
-    { label: "Empresas", items: [["companies", "Empresas parceiras", "building"]] },
-    { label: "Jovens", items: [
-      ["apprentices", "Jovens / Aprendizes", "users"],
-      ["admissions", "AdmissÃµes", "tasks"],
-      ["contracts", "Contratos", "calendar"],
-      ["leaves", "FÃ©rias e afastamentos", "history"],
-      ["terminations", "Desligamentos", "alert"],
-    ] },
-    { label: "AcadÃªmico", items: [
-      ["courses", "Cursos", "book"],
-      ["enrollments", "MatrÃ­culas", "link"],
-    ] },
-    { label: "Administrativo", items: [
-      ["personnel", "Departamento Pessoal", "users"],
-      ["finance", "Financeiro", "calendar"],
-      ["documents", "Documentos", "upload"],
-      ["accounting", "Contabilidade", "mail"],
-      ["procedures", "Procedimentos", "tasks"],
-      ["people", "Pessoas e Convites", "users"],
-      ["audit", "Auditoria", "history"],
-    ] },
-  ],
-  apprentice: [
-    { label: "Jovem aprendiz", items: [
-      ["student-home", "InÃ­cio", "home"],
-      ["student-courses", "Meus cursos", "book"],
-      ["student-activities", "Atividades", "check"],
-    ] },
-  ],
-  company: [
-    { label: "Representante da empresa", items: [
-      ["company-home", "VisÃ£o geral", "grid"],
-      ["company-apprentices", "Aprendizes", "users"],
-    ] },
-  ],
-};
-
-function canAccessView(view, profile = state.profile) {
-  if (!profile) return false;
-  if (profile.role === "apprentice") return ["student-home", "student-courses", "student-activities", "student-course"].includes(view);
-  if (profile.role === "company") return ["company-home", "company-apprentices"].includes(view);
-  const permission = viewPermissions[view];
-  return Boolean(permission && hasPermission(permission, profile));
-}
-
-function navigationForProfile(profile = state.profile) {
-  return (navigation[profile?.role] || [])
-    .map((group) => ({ ...group, items: (group.items || []).filter(([view]) => canAccessView(view, profile)) }))
-    .filter((group) => group.items.length);
-}
-
-function navigationItems(profile = state.profile) {
-  return navigationForProfile(profile).flatMap((group) => group.items || []);
-}
-
-// Guides are defined by page, not department; rendered permissions still apply.
-
-const icons = {
-  grid: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
-  home: '<path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/>',
-  building: '<path d="M4 21V3h11v18M15 9h5v12M8 7h3M8 11h3M8 15h3M7 21h14"/>',
-  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
-  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5z"/><path d="M4 6.5v13M8 8h8"/>',
-  link: '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/>',
-  check: '<path d="m5 12 4 4L19 6"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
-  logout: '<path d="M10 17l5-5-5-5M15 12H3M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/>',
-  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
-  close: '<path d="m6 6 12 12M18 6 6 18"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 1 1 4.1 1.9c-1 .8-1.7 1.2-1.7 2.6M12 17h.01"/>',
-  mail: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',
-  lock: '<rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>',
-  shield: '<path d="M12 3 4 6v5c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/>',
-  empty: '<path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
-  chevron: '<path d="m9 18 6-6-6-6"/>',
-  edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/>',
-  calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/>',
-  trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
-  archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9M10 13h4"/>',
-  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/>',
-  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
-  download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
-  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 21h16"/>',
-  play: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>',
-  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 20"/>',
-  presentation: '<path d="M4 3h16v12H4zM8 21l4-6 4 6M2 3h20"/>',
-  kanban: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/>',
-  tasks: '<path d="m4 7 2 2 4-4M4 15l2 2 4-4M13 7h7M13 15h7"/>',
-  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
-  alert: '<path d="M12 3 2.8 19h18.4z"/><path d="M12 9v4M12 17h.01"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
-  flag: '<path d="M5 21V4M5 5h11l-2 4 2 4H5"/>',
-};
-
-function icon(name, className = "") {
-  return `<svg class="icon ${className}" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[name] || icons.grid}</svg>`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character]);
-}
-
-function initials(name) {
-  return String(name || "CA").trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
-}
-
-function formatDate(value, withTime = false) {
-  if (!value) return "Sem prazo";
-  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T12:00:00` : value);
-  if (Number.isNaN(date.getTime())) return "Sem prazo";
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
-  }).format(date);
-}
-
-function digitsOnly(value) {
-  return String(value || "").replace(/\D/g, "");
-}
-
-function normalizeCnpj(value) {
-  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-function valueOrNull(value) {
-  const cleaned = String(value || "").trim();
-  return cleaned || null;
-}
-
-function formatCnpj(value) {
-  const characters = normalizeCnpj(value);
-  if (characters.length !== 14) return value || "CNPJ nÃ£o informado";
-  return characters.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2})$/, "$1.$2.$3/$4-$5");
-}
-
-function isValidCnpj(value) {
-  const characters = normalizeCnpj(value);
-  if (!/^[A-Z0-9]{12}\d{2}$/.test(characters) || /^(.)\1+$/.test(characters)) return false;
-  const values = [...characters].map((character) => character.charCodeAt(0) - 48);
-  const calculateDigit = (length, weights) => {
-    const sum = values.slice(0, length).reduce((total, character, index) => total + character * weights[index], 0);
-    const remainder = sum % 11;
-    return remainder < 2 ? 0 : 11 - remainder;
-  };
-  const first = calculateDigit(12, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  const second = calculateDigit(13, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  return Number(characters[12]) === first && Number(characters[13]) === second;
-}
-
-function formatPhone(value) {
-  const digits = digitsOnly(value);
-  if (digits.length === 11) return digits.replace(/^(\d{2})(\d{5})(\d{4})$/, "($1) $2-$3");
-  if (digits.length === 10) return digits.replace(/^(\d{2})(\d{4})(\d{4})$/, "($1) $2-$3");
-  return value || "NÃ£o informado";
-}
-
-function formatWorkload(value) {
-  const hours = Number(value || 0);
-  if (!hours) return "Carga horÃ¡ria nÃ£o informada";
-  return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(hours)} h`;
-}
-
-function formatMoney(value) {
-  if (value === null || value === undefined || value === "") return "NÃ£o informado";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
-}
-
-function formatMonth(value) {
-  if (!value) return "CompetÃªncia nÃ£o informada";
-  const date = new Date(`${String(value).slice(0, 7)}-15T12:00:00`);
-  if (Number.isNaN(date.getTime())) return "CompetÃªncia nÃ£o informada";
-  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(date);
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
-
-function formatFileSize(value) {
-  const bytes = Number(value || 0);
-  if (!bytes) return "Tamanho nÃ£o informado";
-  if (bytes < 1024 * 1024) return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(bytes / 1024)} KB`;
-  return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(bytes / (1024 * 1024))} MB`;
-}
-
-function selectOptions(labels, selected = "") {
-  return Object.entries(labels).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
-}
-
-function workflowProgress(labels, currentStatus) {
-  const entries = Object.entries(labels).filter(([value]) => !["cancelled", "rejected", "withdrawn", "talent_pool", "hired"].includes(value));
-  const foundIndex = entries.findIndex(([value]) => value === currentStatus);
-  const currentIndex = currentStatus === "hired" ? entries.findIndex(([value]) => value === "approved") : foundIndex;
-  return `<div class="workflow-steps">${entries.map(([value, label], index) => `<span class="workflow-step ${index < currentIndex ? "is-complete" : index === currentIndex ? "is-current" : ""}"><i>${index < currentIndex ? "âœ“" : index + 1}</i><small>${escapeHtml(label)}</small></span>`).join("")}</div>`;
-}
-
-function formatDateTimeInput(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
-function progressPercent(completed, total) {
-  if (!total) return 0;
-  return Math.min(100, Math.round((completed / total) * 100));
-}
-
-function compactText(value, max = 170) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max).trim()}â€¦` : text;
-}
-
-function parseSlides(value) {
-  return String(value || "")
-    .split(/\n\s*---\s*\n/g)
-    .map((part, index) => {
-      const lines = part.trim().split("\n");
-      return { title: lines.shift()?.trim() || `Slide ${index + 1}`, body: lines.join("\n").trim() };
-    })
-    .filter((slide) => slide.title || slide.body);
-}
-
-function safeHttpUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
-  } catch {
-    return "";
-  }
-}
-
-function defaultView(profile = state.profile) {
-  if (typeof profile === "string") return profile === "cafcm_admin" ? "overview" : profile === "company" ? "company-home" : "student-home";
-  return navigationItems(profile)[0]?.[0] || (profile?.role === "company" ? "company-home" : "student-home");
-}
-
-function viewTitle(view) {
-  const titles = {
-    overview: ["VisÃ£o geral", "SituaÃ§Ã£o real do portal"],
-    pipelines: ["Central de Esteiras", "Processos da operaÃ§Ã£o CAFCM"],
-    tasks: ["Tarefas e PendÃªncias", "ResponsÃ¡veis, prazos e checklists"],
-    notifications: ["NotificaÃ§Ãµes", "AtualizaÃ§Ãµes direcionadas ao seu acesso"],
-    automations: ["AutomaÃ§Ãµes", "Alertas, documentos e comunicaÃ§Ãµes"],
-    companies: ["Empresas", "Parceiros vinculados aos aprendizes"],
-    apprentices: ["Jovens / Aprendizes", "Cadastro central dos jovens"],
-    admissions: ["AdmissÃµes", "Documentos, contratos e inÃ­cio do jovem"],
-    contracts: ["Contratos", "VigÃªncia, vencimentos e vÃ­nculos"],
-    leaves: ["FÃ©rias e afastamentos", "Controle de datas e providÃªncias"],
-    terminations: ["Desligamentos", "Processos, documentos e histÃ³rico"],
-    personnel: ["Departamento Pessoal", "Ciclo administrativo dos jovens"],
-    finance: ["Financeiro", "CobranÃ§as, boletos e recebimentos"],
-    documents: ["Documentos", "Arquivo digital privado da CAFCM"],
-    accounting: ["Contabilidade", "Envios, retornos e conferÃªncia"],
-    procedures: ["Procedimentos", "Processos, responsÃ¡veis e prazos"],
-    people: ["Pessoas e convites", "Acessos criados pela CAFCM"],
-    courses: ["Cursos", "FormaÃ§Ãµes, aulas e atividades"],
-    "course-editor": ["Editor do curso", "ConteÃºdo pedagÃ³gico"],
-    "lesson-editor": ["Estrutura da aula", "Linhas de aprendizagem"],
-    enrollments: ["MatrÃ­culas", "VÃ­nculos entre jovens e cursos"],
-    audit: ["Auditoria", "HistÃ³rico das aÃ§Ãµes no portal"],
-    indicators: ["Indicadores e relatÃ³rios", "Dados reais para apoiar a gestÃ£o"],
-    "student-home": ["InÃ­cio", "Sua formaÃ§Ã£o no Portal CAFCM"],
-    "student-courses": ["Meus cursos", "ConteÃºdos liberados pela CAFCM"],
-    "student-activities": ["Atividades", "Acompanhe seus envios"],
-    "student-course": ["Curso", "Aulas e atividades"],
-    "company-home": ["VisÃ£o geral", "Progresso dos jovens da sua empresa"],
-    "company-apprentices": ["Aprendizes", "Jovens vinculados Ã  sua empresa"],
-  };
-  return titles[view] || ["Portal CAFCM", "Aprendizagem"];
-}
-
-function brand(inverse = false) {
-  return `<span class="brand ${inverse ? "brand-inverse" : ""}">
-    <span class="brand-mark">CA</span>
-    <span class="brand-copy"><strong>Portal CAFCM</strong><small>Aprendizagem profissional</small></span>
-  </span>`;
-}
-
-function setBusy(form, busy, label = "Processando...") {
-  const button = form?.querySelector('button[type="submit"]');
-  if (!button) return;
-  if (busy) {
-    button.dataset.originalLabel = button.innerHTML;
-    button.disabled = true;
-    button.textContent = label;
-  } else {
-    button.disabled = false;
-    button.innerHTML = button.dataset.originalLabel || "Continuar";
-  }
-}
-
-function showToast(message, type = "success") {
-  const toast = document.querySelector("#toast");
-  if (!toast) return;
-  toast.textContent = message;
-  toast.className = `toast show ${type}`;
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 3800);
-}
-
-function friendlyError(error) {
-  const message = String(error?.message || "");
-  if (error?.code === "23505" && message.includes("companies_cnpj_unique_idx")) return "JÃ¡ existe uma empresa cadastrada com este CNPJ.";
-  if (error?.code === "23514") return "Revise os dados informados: um dos campos estÃ¡ fora do formato permitido.";
-  if (message.toLowerCase().includes("failed to fetch")) return "NÃ£o foi possÃ­vel conectar ao serviÃ§o. Verifique sua internet e tente novamente.";
-  return message || "NÃ£o foi possÃ­vel concluir.";
-}
-
-function showFormError(form, message) {
-  form?.querySelector(".form-error")?.remove();
-  if (!form) return;
-  const alert = document.createElement("div");
-  alert.className = "form-error";
-  alert.setAttribute("role", "alert");
-  alert.textContent = message;
-  form.prepend(alert);
-}
-
-function renderBoot() {
-  app.innerHTML = `<main class="boot"><span class="brand-mark">CA</span><div class="spinner"></div><p>Preparando o Portal CAFCM...</p></main>`;
-}
-
-async function callAdmin(payload, authenticated = false) {
-  const headers = {
-    "Content-Type": "application/json",
-    apikey: SUPABASE_KEY,
-  };
-  if (authenticated) {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session?.access_token) throw new Error("Sua sessÃ£o expirou. Entre novamente.");
-    headers.Authorization = `Bearer ${data.session.access_token}`;
-  }
-  const response = await fetch(ADMIN_FUNCTION, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || "NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
-    error.code = body.code || null;
-    error.status = response.status;
-    throw error;
-  }
-  return body;
-}
-
-async function callAutomation(payload) {
-  const { data } = await supabase.auth.getSession();
-  if (!data.session?.access_token) throw new Error("Sua sessÃ£o expirou. Entre novamente.");
-  const response = await fetch(AUTOMATION_FUNCTION, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${data.session.access_token}`,
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || "NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
-    error.status = response.status;
-    throw error;
-  }
-  return body;
-}
-
-async function renderLogin(mode = "login") {
-  state.profile = null;
-  state.view = null;
-  const loginMode = mode === "login";
-  const recoverMode = mode === "recover";
-  const resendMode = mode === "resend";
-  const bootstrapMode = mode === "bootstrap";
-  const heading = bootstrapMode
-    ? "Configure o primeiro acesso."
-    : recoverMode
-      ? "Recupere sua senha."
-      : resendMode
-        ? "Reenvie a confirmaÃ§Ã£o."
-        : "Entre no Portal CAFCM.";
-  const intro = bootstrapMode
-    ? "Use a chave inicial fornecida nesta implantaÃ§Ã£o. Depois disso, novos acessos serÃ£o criados somente por convite."
-    : recoverMode
-      ? "Informe o e-mail cadastrado para receber o link de recuperaÃ§Ã£o."
-      : resendMode
-        ? "Use esta opÃ§Ã£o quando o convite jÃ¡ foi aceito, mas o primeiro acesso ainda nÃ£o concluiu."
-        : "O acesso Ã© enviado pela CAFCM. Jovens, empresas e equipe visualizam somente o que corresponde ao seu perfil.";
-
-  app.innerHTML = `
-    <main class="auth-shell">
-      <section class="auth-panel">
-        ${brand()}
-        <div class="auth-main">
-          <p class="eyebrow">Acesso institucional</p>
-          <h1>${heading}</h1>
-          <p class="auth-intro">${intro}</p>
-
-          ${loginMode ? `
-            <form id="login-form" class="stack-form">
-              <label>E-mail<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com" /></label>
-              <label>Senha<input name="password" type="password" autocomplete="current-password" required placeholder="Digite sua senha" /></label>
-              <button class="btn btn-primary btn-block" type="submit">Entrar no portal ${icon("arrow")}</button>
-            </form>
-            <div class="auth-links">
-              <button type="button" class="text-link" data-auth-mode="recover">Esqueci minha senha</button>
-              <button type="button" class="text-link" data-auth-mode="resend">Reenviar confirmaÃ§Ã£o</button>
-              <button type="button" class="text-link setup-link" data-auth-mode="bootstrap" hidden>Configurar primeiro acesso da CAFCM</button>
-            </div>
-          ` : ""}
-
-          ${recoverMode ? `
-            <form id="recover-form" class="stack-form">
-              <label>E-mail<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com" /></label>
-              <button class="btn btn-primary btn-block" type="submit">Enviar link de recuperaÃ§Ã£o</button>
-            </form>
-            <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
-          ` : ""}
-
-          ${resendMode ? `
-            <form id="resend-form" class="stack-form">
-              <label>E-mail<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com" /></label>
-              <button class="btn btn-primary btn-block" type="submit">Reenviar confirmaÃ§Ã£o</button>
-            </form>
-            <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
-          ` : ""}
-
-          ${bootstrapMode ? `
-            <form id="bootstrap-form" class="stack-form">
-              <label>Nome completo<input name="fullName" autocomplete="name" required maxlength="160" /></label>
-              <label>E-mail administrativo<input name="email" type="email" autocomplete="email" required /></label>
-              <label>Crie uma senha<input name="password" type="password" autocomplete="new-password" minlength="10" required /><small>MÃ­nimo de 10 caracteres.</small></label>
-              <label>Chave inicial<input name="code" type="password" autocomplete="off" required /></label>
-              <button class="btn btn-primary btn-block" type="submit">Criar acesso da CAFCM</button>
-            </form>
-            <button type="button" class="text-link back-link" data-auth-mode="login">Voltar para o acesso</button>
-          ` : ""}
-        </div>
-        <p class="auth-foot">Ambiente de aprendizagem administrado pela CAFCM.</p>
-      </section>
-      <aside class="auth-context">
-        <div class="context-content">
-          <span class="context-kicker">Acesso protegido por perfil</span>
-          <h2>Um portal para coordenar, aprender e acompanhar.</h2>
-          <div class="context-list">
-            <article>${icon("shield")}<div><strong>CAFCM</strong><p>Organiza empresas, pessoas, cursos e matrÃ­culas.</p></div></article>
-            <article>${icon("book")}<div><strong>Jovem aprendiz</strong><p>Acessa aulas, registra progresso e envia atividades.</p></div></article>
-            <article>${icon("building")}<div><strong>Representante da empresa</strong><p>Consulta o desenvolvimento dos jovens vinculados Ã  organizaÃ§Ã£o.</p></div></article>
-          </div>
-        </div>
-      </aside>
-      <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    </main>
-  `;
-
-  if (loginMode) {
-    try {
-      const result = await callAdmin({ action: "status" });
-      state.setupRequired = Boolean(result.setupRequired);
-      const setupLink = document.querySelector(".setup-link");
-      if (setupLink) setupLink.hidden = !state.setupRequired;
-    } catch {
-      state.setupRequired = false;
-    }
-  }
-}
-
-function renderPasswordSetup() {
-  app.innerHTML = `
-    <main class="auth-shell compact-auth">
-      <section class="auth-panel">
-        ${brand()}
-        <div class="auth-main">
-          <p class="eyebrow">Primeiro acesso</p>
-          <h1>Crie sua senha.</h1>
-          <p class="auth-intro">Defina uma senha pessoal para concluir o convite ou a recuperaÃ§Ã£o da conta.</p>
-          <form id="password-form" class="stack-form">
-            <label>Nova senha<input name="password" type="password" autocomplete="new-password" minlength="10" required /><small>MÃ­nimo de 10 caracteres.</small></label>
-            <label>Confirme a senha<input name="confirmation" type="password" autocomplete="new-password" minlength="10" required /></label>
-            <button class="btn btn-primary btn-block" type="submit">Salvar senha e entrar</button>
-          </form>
-        </div>
-        <p class="auth-foot">Nunca compartilhe sua senha com terceiros.</p>
-      </section>
-      <aside class="auth-context password-context"><div class="context-content">${icon("shield")}<h2>Seu acesso foi confirmado.</h2><p>Depois de criar a senha, o guia rÃ¡pido mostrarÃ¡ como usar o portal conforme o seu perfil.</p></div></aside>
-      <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    </main>
-  `;
-}
-
-function renderNoAccess() {
-  app.innerHTML = `<main class="message-page">${brand()}<div class="message-card">${icon("shield")}<h1>Acesso aguardando configuraÃ§Ã£o</h1><p>Sua conta existe, mas ainda nÃ£o recebeu um perfil no Portal CAFCM. Solicite a conferÃªncia do convite Ã  equipe responsÃ¡vel.</p><button class="btn btn-secondary" data-logout>Sair</button></div><div id="toast" class="toast"></div></main>`;
-}
-
-async function loadPortal() {
-  const { data: sessionData } = await supabase.auth.getSession();
-  state.session = sessionData.session;
-  if (!state.session) return renderLogin();
-
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("id,full_name,role,company_id,department,onboarding_completed,is_active")
-    .eq("id", state.session.user.id)
-    .single();
-
-  if (error || !profile?.role) return renderNoAccess();
-  if (!profile.is_active) {
-    await supabase.auth.signOut();
-    await renderLogin();
-    return showToast("Este acesso foi arquivado pela CAFCM.", "error");
-  }
-
-  state.profile = profile;
-  // Use router to resolve URL to view
-  const resolved = resolveRoute(state);
-
-  // If no state.view yet, or resolved invalid, fallback to default
-  state.view = state.view && canAccessView(state.view, profile)
-    ? state.view
-    : defaultView(profile);
-
-  // If we fell back, redirect to canonical URL
-  if (!resolved && state.view) {
-    replaceRoute(viewToUrl[state.view] || "/");
-  }
-  state.wizardOpen = false;
-  if (!state.sessionLogged) {
-    state.sessionLogged = true;
-    callAdmin({ action: "log_event", event: "session.started" }, true).catch(() => {});
-  }
-  await renderPortal();
-}
-
-async function renderPortal() {
-  pageTour.stop("navigation", false);
-  const profile = state.profile;
-  if (!profile) return;
-  const nav = navigationForProfile(profile);
-  const [title, subtitle] = viewTitle(state.view);
-  const activeBase = ["course-editor", "lesson-editor"].includes(state.view) ? "courses" : state.view === "student-course" ? "student-courses" : state.view;
-  if (profile.role === "cafcm_admin") {
-    const { count } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("recipient_id", profile.id)
-      .eq("status", "open")
-      .eq("is_read", false);
-    state.notificationUnreadCount = count || 0;
-  } else {
-    state.notificationUnreadCount = 0;
-  }
-
-  app.innerHTML = renderSidebar({
-    nav, activeBase, profile, roleLabels, brandHTML: brand(true), iconFn: icon, profileAccessLabelFn: profileAccessLabel, getInitials: initials, escapeHtmlFn: escapeHtml
-  }) + `
-        <header class="topbar">
-        <header class="topbar">
-          <button class="icon-btn menu-button" data-open-menu aria-label="Abrir menu">${icon("menu")}</button>
-          <div><strong>${title}</strong><small>${subtitle}</small></div>
-          ${profile.role === "cafcm_admin" ? `<button class="icon-btn notification-button ${state.notificationUnreadCount ? "has-unread" : ""}" data-nav="notifications" aria-label="NotificaÃ§Ãµes${state.notificationUnreadCount ? `: ${state.notificationUnreadCount} nÃ£o lidas` : ""}">${icon("bell")}${state.notificationUnreadCount ? `<b>${state.notificationUnreadCount > 99 ? "99+" : state.notificationUnreadCount}</b>` : ""}</button>` : ""}
-          <button class="btn btn-quiet" data-dialog="my-profile">${icon("users")} <span>Minha conta</span></button>
-          <button class="btn btn-quiet help-topbar" data-open-wizard>${icon("help")} <span>Como usar</span></button>
-          <button class="icon-btn" data-logout aria-label="Sair do portal">${icon("logout")}</button>
-        </header>
-        <main id="main-content" class="content"><div class="content-loading"><div class="spinner"></div><p>Carregando informaÃ§Ãµes...</p></div></main>
-      </section>
-      <div id="overlay-root"></div>
-      <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    </div>
-  `;
-
-  await renderView();
-}
-
-async function renderView() {
-  pageTour.stop("navigation", false);
-  const content = document.querySelector("#main-content");
-  if (!content) return;
-  try {
-    if (!canAccessView(state.view, state.profile)) state.view = defaultView(state.profile);
-    const renderers = {
-      overview: renderAdminOverview,
-      pipelines: renderPipelines,
-      tasks: renderTasks,
-      notifications: renderNotifications,
-      automations: renderAutomations,
-      companies: renderCompanies,
-      apprentices: renderApprentices,
-      admissions: renderAdmissions,
-      contracts: renderContracts,
-      leaves: renderLeaves,
-      terminations: renderTerminations,
-      personnel: renderPersonnel,
-      finance: renderFinance,
-      documents: renderDocuments,
-      accounting: renderAccounting,
-      procedures: renderProcedures,
-      vacancies: renderVacancies,
-      partnerships: renderPartnerships,
-      people: renderPeople,
-      courses: renderCourses,
-      "course-editor": renderCourseEditor,
-      "lesson-editor": renderLessonEditor,
-      enrollments: renderEnrollments,
-      audit: renderAudit,
-      indicators: renderIndicators,
-      "student-home": renderStudentHome,
-      "student-courses": renderStudentCourses,
-      "student-activities": renderStudentActivities,
-      "student-course": renderStudentCourse,
-      "company-home": renderCompanyHome,
-      "company-apprentices": renderCompanyApprentices,
-    };
-    await (renderers[state.view] || renderers[defaultView(state.profile)])(content);
-    for (const form of content.querySelectorAll("form[id]")) {
-      const help = document.createElement("button");
-      help.type = "button";
-      help.className = "btn btn-small btn-quiet form-guide-help";
-      help.dataset.guideForm = form.id;
-      help.textContent = "Como preencher este formulÃ¡rio";
-      form.before(help);
-    }
-  } catch (error) {
-    console.error(error);
-    content.innerHTML = errorState(error.message);
-  }
-}
-
-function pageHead(title, text, action = "") {
-  return `<header class="page-head"><div><h1>${title}</h1><p>${text}</p></div>${action}</header>`;
-}
-
-function emptyState(title, text, action = "") {
-  return `<div class="empty-state"><span>${icon("empty")}</span><h2>${title}</h2><p>${text}</p>${action}</div>`;
-}
-
-function errorState(message) {
-  return `<div class="empty-state error-state"><span>!</span><h2>NÃ£o foi possÃ­vel carregar</h2><p>${escapeHtml(message || "Tente novamente em instantes.")}</p><button class="btn btn-secondary" data-reload>Carregar novamente</button></div>`;
-}
-
-function metric(label, value, iconName, note = "") {
-  return `<article class="metric"><span class="metric-icon">${icon(iconName)}</span><div><small>${label}</small><strong>${value}</strong>${note ? `<p>${note}</p>` : ""}</div></article>`;
-}
-
-function statusBadge(status) {
-  const labels = {
-    draft: "Rascunho",
-    published: "Publicado",
-    archived: "Arquivado",
-    submitted: "Enviada",
-    reviewed: "Revisada",
-    pending: "Pendente",
-    in_progress: "Em andamento",
-    waiting: "Aguardando terceiro",
-    completed: "ConcluÃ­da",
-    cancelled: "Cancelada",
-  };
-  return `<span class="status status-${status}">${labels[status] || status}</span>`;
-}
-
-const priorityLabels = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
-const priorityOrder = { urgent: 4, high: 3, normal: 2, low: 1 };
-
-function priorityBadge(priority = "normal") {
-  return `<span class="priority priority-${priority}">${priorityLabels[priority] || priority}</span>`;
-}
-
-function isOverdue(value) {
-  if (!value) return false;
-  const date = new Date(value);
-  return !Number.isNaN(date.getTime()) && date.getTime() < Date.now();
-}
-
-function localDayKey(value = new Date()) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function dueMarkup(value, closed = false) {
-  if (!value) return `<span class="due-label no-due">${icon("calendar")} Sem prazo</span>`;
-  const overdue = !closed && isOverdue(value);
-  return `<span class="due-label ${overdue ? "overdue" : ""}">${icon(overdue ? "alert" : "calendar")} ${overdue ? "Atrasado Â· " : ""}${formatDate(value, true)}</span>`;
-}
-
-async function countRows(table, filter) {
-  let query = supabase.from(table).select("*", { count: "exact", head: true });
-  if (filter) query = filter(query);
-  const { count, error } = await query;
-  if (error) throw error;
-  return count || 0;
-}
-
-async function renderAdminOverview(content) {
-  const [companies, apprentices, courses, admissions, contracts, taskResult, processResult, alertResult] = await Promise.all([
-    countRows("companies", (query) => query.eq("is_active", true)),
-    countRows("profiles", (query) => query.eq("role", "apprentice").eq("is_active", true)),
-    countRows("courses"),
-    countRows("admission_cases", (query) => query.not("status", "in", "(completed,cancelled)")),
-    countRows("contracts", (query) => query.in("status", ["scheduled", "active", "closing"])),
-    supabase.from("tasks").select("id,title,status,priority,due_at").not("status", "in", "(completed,cancelled)").order("due_at", { ascending: true, nullsFirst: false }).limit(250),
-    supabase.from("pipeline_items").select("id,title,pipeline_id,priority,due_at,closed_at").eq("is_archived", false).order("due_at", { ascending: true, nullsFirst: false }).limit(250),
-    supabase.from("operational_alerts").select("id,category,severity,title,message,due_on,metadata").eq("status", "active").order("severity").order("due_on", { ascending: true, nullsFirst: false }).limit(100),
-  ]);
-  if (taskResult.error || processResult.error || alertResult.error) throw taskResult.error || processResult.error || alertResult.error;
-  const openTasks = taskResult.data || [];
-  const openProcesses = (processResult.data || []).filter((item) => !item.closed_at);
-  const liveAttention = [
-    ...openTasks.filter((task) => isOverdue(task.due_at)).map((task) => ({ ...task, kind: "task" })),
-    ...openProcesses.filter((item) => isOverdue(item.due_at)).map((item) => ({ ...item, kind: "process" })),
-  ].sort((first, second) => new Date(first.due_at) - new Date(second.due_at));
-  const alertView = {
-    contract: "contracts", admission: "admissions", document: "documents", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves", vacancy: "vacancies", recruitment: "vacancies", finance: "finance", academic: "courses",
-  };
-  const persistedAlerts = (alertResult.data || [])
-    .map((item) => ({ ...item, kind: "alert", target: alertView[item.category] || "overview" }))
-    .filter((item) => canAccessView(item.target));
-  const attention = [...persistedAlerts, ...liveAttention.filter((item) => !persistedAlerts.some((alert) => alert.category === item.kind))];
-  const urgentCount = persistedAlerts.filter((item) => item.severity === "urgent").length;
-  const metrics = [
-    ["Empresas ativas", companies, "building", canAccessView("companies")],
-    ["Jovens ativos", apprentices, "users", canAccessView("apprentices")],
-    ["AdmissÃµes em andamento", admissions, "tasks", canAccessView("admissions")],
-    ["Contratos acompanhados", contracts, "calendar", canAccessView("contracts")],
-    ["Processos abertos", openProcesses.length, "kanban", canAccessView("pipelines")],
-    ["Tarefas pendentes", openTasks.length, "tasks", canAccessView("tasks")],
-  ].filter((item) => item[3]);
-  const quickActions = [
-    [`${persistedAlerts.filter((item) => item.category === "document").length} documentos pendentes`, persistedAlerts.some((item) => item.category === "document"), "admissions"],
-    [`${persistedAlerts.filter((item) => item.category === "contract").length} contratos em alerta`, persistedAlerts.some((item) => item.category === "contract"), "contracts"],
-    [`${persistedAlerts.filter((item) => item.category === "accounting").length} retornos da contabilidade`, persistedAlerts.some((item) => item.category === "accounting"), "accounting"],
-    ["Abrir a Central de Esteiras", openProcesses.length > 0, "pipelines"],
-    ["Conferir tarefas e prazos", openTasks.length > 0, "tasks"],
-  ].filter((item) => canAccessView(item[2]));
-
-  content.innerHTML = `
-    ${pageHead("VisÃ£o geral", "Veja o que exige providÃªncia no trabalho do seu departamento.", hasPermission("operations.manage") ? `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>` : "")}
-    <section class="metric-grid">
-      ${metrics.map(([label, value, iconName]) => metric(label, value, iconName)).join("")}
-    </section>
-    <section class="dashboard-grid">
-      <article class="card attention-card">
-        <div class="card-head"><div><span class="eyebrow">Precisa da sua atenÃ§Ã£o</span><h2>${attention.length ? `${attention.length} ${attention.length === 1 ? "pendÃªncia identificada" : "pendÃªncias identificadas"}` : "Nenhuma pendÃªncia crÃ­tica"}</h2></div>${attention.length ? `<span class="attention-count">${urgentCount || attention.length}</span>` : ""}</div>
-        ${attention.length ? `<div class="attention-list">${attention.slice(0, 8).map((item) => {
-          const isAlert = item.kind === "alert";
-          const iconName = isAlert ? (item.category === "contract" ? "calendar" : item.category === "accounting" ? "mail" : item.category === "document" ? "upload" : item.category === "task" ? "tasks" : "alert") : item.kind === "task" ? "tasks" : "kanban";
-          const destination = isAlert ? item.target : item.kind === "task" ? "tasks" : "pipelines";
-          const detail = isAlert ? item.message : `${item.kind === "task" ? "Tarefa" : "Processo"} Â· prazo em ${formatDate(item.due_at, true)}`;
-          return `<button data-nav="${destination}"><span class="attention-icon">${icon(iconName)}</span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(detail)}</small></span>${isAlert ? `<span class="status status-${item.severity === "urgent" ? "cancelled" : "draft"}">${item.severity === "urgent" ? "Urgente" : "AtenÃ§Ã£o"}</span>` : priorityBadge(item.priority)}</button>`;
-        }).join("")}</div>` : `<div class="attention-clear">${icon("check")}<div><strong>Rotina em dia</strong><p>NÃ£o hÃ¡ tarefas, processos ou alertas disponÃ­veis para o seu departamento.</p></div></div>`}
-      </article>
-      <article class="card quick-actions-card">
-        <div class="card-head"><div><span class="eyebrow">Rotina de hoje</span><h2>PrÃ³ximas aÃ§Ãµes</h2></div></div>
-        ${quickActions.map(([label, done, destination]) => checklistItem(label, done, destination)).join("")}
-      </article>
-    </section>
-  `;
-}
-
-function checklistItem(label, done, destination) {
-  return `<button class="checklist-item" data-nav="${destination}"><span class="check-circle ${done ? "done" : ""}">${done ? icon("check") : ""}</span><span>${label}</span>${icon("chevron")}</button>`;
-}
-
-async function loadOperationalReferences() {
-  const [{ data: companies, error: companiesError }, { data: profiles, error: profilesError }] = await Promise.all([
-    supabase.from("companies").select("id,name,is_active").order("is_active", { ascending: false }).order("name"),
-    supabase.from("profiles").select("id,full_name,role,company_id,is_active").order("full_name"),
-  ]);
-  if (companiesError || profilesError) throw companiesError || profilesError;
-  return {
-    companies: companies || [],
-    profiles: profiles || [],
-    apprentices: (profiles || []).filter((profile) => profile.role === "apprentice" && profile.is_active),
-    administrators: (profiles || []).filter((profile) => profile.role === "cafcm_admin" && profile.is_active),
-  };
-}
-
-function filterPipelineItems(items) {
-  const search = state.pipelineSearch.trim().toLocaleLowerCase("pt-BR");
-  return items.filter((item) => {
-    const haystack = [item.title, item.description, item.companyName, item.apprenticeName, item.responsibleName].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
-    return (!search || haystack.includes(search))
-      && (!state.pipelinePriority || item.priority === state.pipelinePriority)
-      && (!state.pipelineResponsible || item.responsible_id === state.pipelineResponsible)
-      && (!state.pipelineCompany || item.company_id === state.pipelineCompany);
-  }).sort((first, second) => {
-    if (state.pipelineSort === "oldest") return new Date(first.created_at) - new Date(second.created_at);
-    if (state.pipelineSort === "due") {
-      const firstDue = first.due_at ? new Date(first.due_at).getTime() : Number.MAX_SAFE_INTEGER;
-      const secondDue = second.due_at ? new Date(second.due_at).getTime() : Number.MAX_SAFE_INTEGER;
-      return firstDue - secondDue;
-    }
-    if (state.pipelineSort === "priority") return (priorityOrder[second.priority] || 0) - (priorityOrder[first.priority] || 0);
-    return new Date(second.last_moved_at) - new Date(first.last_moved_at);
-  });
-}
-
-async function renderPipelines(content) {
-  const [{ data: pipelines, error }, references] = await Promise.all([
-    supabase.from("pipelines").select("*").eq("is_active", true).order("position"),
-    loadOperationalReferences(),
-  ]);
-  if (error) throw error;
-  if (!pipelines?.length) {
-    content.innerHTML = `${pageHead("Central de Esteiras", "Acompanhe os processos da operaÃ§Ã£o CAFCM.")}<section class="card">${emptyState("Nenhuma esteira ativa", "Ative ao menos uma esteira para organizar os processos.")}</section>`;
-    return;
-  }
-
-  if (!state.selectedPipelineId || !pipelines.some((pipeline) => pipeline.id === state.selectedPipelineId)) {
-    state.selectedPipelineId = pipelines[0].id;
-  }
-  const selectedPipeline = pipelines.find((pipeline) => pipeline.id === state.selectedPipelineId);
-  const [{ data: stages, error: stagesError }, { data: items, error: itemsError }] = await Promise.all([
-    supabase.from("pipeline_stages").select("*").eq("pipeline_id", state.selectedPipelineId).eq("is_active", true).order("position"),
-    supabase.from("pipeline_items").select("*").eq("pipeline_id", state.selectedPipelineId).eq("is_archived", false).order("position"),
-  ]);
-  if (stagesError || itemsError) throw stagesError || itemsError;
-
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const profileMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const enrichedItems = (items || []).map((item) => ({
-    ...item,
-    companyName: companyMap.get(item.company_id) || "",
-    apprenticeName: profileMap.get(item.apprentice_id) || "",
-    responsibleName: profileMap.get(item.responsible_id) || "",
-  }));
-  const visibleItems = filterPipelineItems(enrichedItems);
-  const overdueCount = visibleItems.filter((item) => !item.closed_at && isOverdue(item.due_at)).length;
-  const unassignedCount = visibleItems.filter((item) => !item.responsible_id && !item.closed_at).length;
-  const hasFilters = Boolean(state.pipelineSearch || state.pipelinePriority || state.pipelineResponsible || state.pipelineCompany || state.pipelineSort !== "recent");
-
-  content.innerHTML = `
-    ${pageHead("Central de Esteiras", "Mova cada processo conforme o trabalho avanÃ§a. A mudanÃ§a de etapa Ã© registrada automaticamente.", `<button class="btn btn-primary" data-dialog="pipeline-item">${icon("plus")} Novo processo</button>`)}
-    <section class="pipeline-toolbar card">
-      <label class="pipeline-selector"><span>Esteira</span><select data-pipeline-select>${pipelines.map((pipeline) => `<option value="${pipeline.id}" ${pipeline.id === state.selectedPipelineId ? "selected" : ""}>${escapeHtml(pipeline.name)}</option>`).join("")}</select></label>
-      <div class="pipeline-context"><span class="pipeline-color" style="background:${selectedPipeline.color}"></span><div><strong>${escapeHtml(selectedPipeline.name)}</strong><small>${escapeHtml(selectedPipeline.description)}</small></div></div>
-      <div class="pipeline-counters"><span><strong>${visibleItems.length}</strong> exibidos</span><span class="${overdueCount ? "counter-danger" : ""}"><strong>${overdueCount}</strong> atrasados</span><span><strong>${unassignedCount}</strong> sem responsÃ¡vel</span></div>
-    </section>
-    <section class="filter-bar card">
-      <label class="search-field">${icon("search")}<input type="search" data-pipeline-search value="${escapeHtml(state.pipelineSearch)}" placeholder="Buscar processo, empresa ou jovem" aria-label="Buscar processos" /></label>
-      <select data-pipeline-filter="priority" aria-label="Filtrar por prioridade"><option value="">Todas as prioridades</option>${Object.entries(priorityLabels).map(([value, label]) => `<option value="${value}" ${state.pipelinePriority === value ? "selected" : ""}>${label}</option>`).join("")}</select>
-      <select data-pipeline-filter="responsible" aria-label="Filtrar por responsÃ¡vel"><option value="">Todos os responsÃ¡veis</option>${references.administrators.map((person) => `<option value="${person.id}" ${state.pipelineResponsible === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select>
-      <select data-pipeline-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.pipelineCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>
-      <select data-pipeline-filter="sort" aria-label="Ordenar processos"><option value="recent" ${state.pipelineSort === "recent" ? "selected" : ""}>MovimentaÃ§Ã£o recente</option><option value="oldest" ${state.pipelineSort === "oldest" ? "selected" : ""}>Mais antigos</option><option value="due" ${state.pipelineSort === "due" ? "selected" : ""}>Prazo mais prÃ³ximo</option><option value="priority" ${state.pipelineSort === "priority" ? "selected" : ""}>Maior prioridade</option></select>
-      ${hasFilters ? `<button class="btn btn-small btn-quiet" data-clear-pipeline-filters>Limpar filtros</button>` : ""}
-    </section>
-    <section class="kanban-shell" aria-label="Quadro da esteira ${escapeHtml(selectedPipeline.name)}">
-      <div class="kanban-board">
-        ${(stages || []).map((stage) => {
-          const stageItems = visibleItems.filter((item) => item.stage_id === stage.id);
-          return `<section class="kanban-column" data-drop-stage="${stage.id}">
-            <header class="kanban-column-head"><span class="stage-dot" style="background:${stage.color}"></span><strong>${escapeHtml(stage.name)}</strong><b>${stageItems.length}</b></header>
-            <div class="kanban-column-body">
-              ${stageItems.length ? stageItems.map((item) => {
-                const overdue = !stage.is_terminal && isOverdue(item.due_at);
-                return `<article class="kanban-card ${overdue ? "is-overdue" : ""}" draggable="true" data-pipeline-item="${item.id}">
-                  <header><span class="process-kind">${escapeHtml(selectedPipeline.name)}</span><button class="icon-btn" data-edit-pipeline-item="${item.id}" aria-label="Alterar processo">${icon("edit")}</button></header>
-                  <h3>${escapeHtml(item.title)}</h3>
-                  ${item.description ? `<p>${escapeHtml(compactText(item.description, 130))}</p>` : ""}
-                  <div class="process-badges">${priorityBadge(item.priority)}${item.companyName ? `<span>${icon("building")} ${escapeHtml(item.companyName)}</span>` : ""}${item.apprenticeName ? `<span>${icon("users")} ${escapeHtml(item.apprenticeName)}</span>` : ""}</div>
-                  <div class="process-due">${dueMarkup(item.due_at, stage.is_terminal)}</div>
-                  <footer><span class="process-owner">${item.responsibleName ? `<i>${escapeHtml(initials(item.responsibleName))}</i>${escapeHtml(item.responsibleName)}` : "Sem responsÃ¡vel"}</span><small>Movido em ${formatDate(item.last_moved_at, true)}</small></footer>
-                  <label class="mobile-stage-move"><span>Mover para</span><select data-move-process="${item.id}">${(stages || []).map((option) => `<option value="${option.id}" ${option.id === stage.id ? "selected" : ""}>${escapeHtml(option.name)}</option>`).join("")}</select></label>
-                </article>`;
-              }).join("") : `<div class="kanban-empty">Solte um processo nesta etapa</div>`}
-            </div>
-          </section>`;
-        }).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function taskMatchesFilter(task) {
-  const open = !["completed", "cancelled"].includes(task.status);
-  const dueDay = localDayKey(task.due_at);
-  const today = localDayKey();
-  if (state.taskFilter === "today") return open && dueDay === today;
-  if (state.taskFilter === "overdue") return open && isOverdue(task.due_at);
-  if (state.taskFilter === "upcoming") return open && Boolean(task.due_at) && dueDay > today;
-  if (state.taskFilter === "completed") return task.status === "completed";
-  return open && task.assigned_to === state.profile.id;
-}
-
-async function renderTasks(content) {
-  const [taskResult, checklistResult, pipelineResult, references] = await Promise.all([
-    supabase.from("tasks").select("*").order("created_at", { ascending: false }).limit(500),
-    supabase.from("task_checklist_items").select("*").order("position").limit(1000),
-    supabase.from("pipeline_items").select("id,title").eq("is_archived", false).order("title"),
-    loadOperationalReferences(),
-  ]);
-  if (taskResult.error || checklistResult.error || pipelineResult.error) throw taskResult.error || checklistResult.error || pipelineResult.error;
-  const tasks = taskResult.data || [];
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const profileMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const processMap = new Map((pipelineResult.data || []).map((item) => [item.id, item.title]));
-  const checklistByTask = new Map();
-  for (const item of checklistResult.data || []) {
-    if (!checklistByTask.has(item.task_id)) checklistByTask.set(item.task_id, []);
-    checklistByTask.get(item.task_id).push(item);
-  }
-  const counts = {
-    mine: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && task.assigned_to === state.profile.id).length,
-    today: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && localDayKey(task.due_at) === localDayKey()).length,
-    overdue: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && isOverdue(task.due_at)).length,
-    upcoming: tasks.filter((task) => !["completed", "cancelled"].includes(task.status) && task.due_at && localDayKey(task.due_at) > localDayKey()).length,
-    completed: tasks.filter((task) => task.status === "completed").length,
-  };
-  const visibleTasks = tasks.filter(taskMatchesFilter).sort((first, second) => {
-    const overdueDifference = Number(isOverdue(second.due_at) && !["completed", "cancelled"].includes(second.status)) - Number(isOverdue(first.due_at) && !["completed", "cancelled"].includes(first.status));
-    if (overdueDifference) return overdueDifference;
-    return (priorityOrder[second.priority] || 0) - (priorityOrder[first.priority] || 0) || new Date(first.due_at || "9999-12-31") - new Date(second.due_at || "9999-12-31");
-  });
-  const filters = [
-    ["mine", "Minhas tarefas"],
-    ["today", "Hoje"],
-    ["overdue", "Atrasadas"],
-    ["upcoming", "PrÃ³ximas"],
-    ["completed", "ConcluÃ­das"],
-  ];
-
-  content.innerHTML = `
-    ${pageHead("Tarefas e PendÃªncias", "Distribua responsabilidades, acompanhe prazos e registre a conclusÃ£o de cada etapa.", `<button class="btn btn-primary" data-dialog="task">${icon("plus")} Nova tarefa</button>`)}
-    <div class="task-filter-tabs" role="tablist">${filters.map(([id, label]) => `<button class="${state.taskFilter === id ? "active" : ""}" data-task-filter="${id}" role="tab" aria-selected="${state.taskFilter === id}"><span>${label}</span><b>${counts[id]}</b></button>`).join("")}</div>
-    <section class="task-list">
-      ${visibleTasks.length ? visibleTasks.map((task) => {
-        const checklist = checklistByTask.get(task.id) || [];
-        const completedChecklist = checklist.filter((item) => item.is_completed).length;
-        const closed = ["completed", "cancelled"].includes(task.status);
-        return `<article class="task-card ${!closed && isOverdue(task.due_at) ? "is-overdue" : ""}">
-          <div class="task-status-column">${statusBadge(task.status)}${priorityBadge(task.priority)}</div>
-          <div class="task-main">
-            <div class="task-title-row"><div><span class="task-category">${escapeHtml(task.category || "Sem categoria")}</span><h2>${escapeHtml(task.title)}</h2></div><button class="icon-btn" data-edit-task="${task.id}" aria-label="Alterar tarefa">${icon("edit")}</button></div>
-            ${task.description ? `<p>${escapeHtml(task.description)}</p>` : ""}
-            <div class="task-relations">${task.company_id ? `<span>${icon("building")} ${escapeHtml(companyMap.get(task.company_id) || "Empresa vinculada")}</span>` : ""}${task.apprentice_id ? `<span>${icon("users")} ${escapeHtml(profileMap.get(task.apprentice_id) || "Jovem vinculado")}</span>` : ""}${task.pipeline_item_id ? `<span>${icon("kanban")} ${escapeHtml(processMap.get(task.pipeline_item_id) || "Processo vinculado")}</span>` : ""}</div>
-            ${checklist.length ? `<div class="task-checklist"><div class="task-checklist-head"><strong>Checklist</strong><small>${completedChecklist}/${checklist.length} concluÃ­dos</small></div>${checklist.map((item) => `<button class="task-check-item ${item.is_completed ? "complete" : ""}" data-toggle-checklist="${item.id}" data-checklist-complete="${item.is_completed}"><span>${item.is_completed ? icon("check") : ""}</span><em>${escapeHtml(item.title)}</em></button>`).join("")}</div>` : ""}
-          </div>
-          <aside class="task-side"><div><small>ResponsÃ¡vel</small><strong>${escapeHtml(profileMap.get(task.assigned_to) || "Sem responsÃ¡vel")}</strong></div>${dueMarkup(task.due_at, closed)}<button class="btn btn-small ${task.status === "completed" ? "btn-secondary" : "btn-primary"}" data-task-status="${task.id}" data-next-status="${task.status === "completed" ? "pending" : "completed"}">${task.status === "completed" ? "Reabrir" : "Concluir"}</button></aside>
-        </article>`;
-      }).join("") : `<section class="card">${emptyState("Nenhuma tarefa nesta visÃ£o", state.taskFilter === "mine" ? "As tarefas atribuÃ­das a vocÃª aparecerÃ£o aqui." : "NÃ£o hÃ¡ tarefas que correspondam a este filtro.", `<button class="btn btn-primary" data-dialog="task">Criar tarefa</button>`)}</section>`}
-    </section>
-  `;
-}
-
-async function renderNotifications(content) {
-  const { data, error } = await supabase.from("notifications").select("*").eq("recipient_id", state.profile.id).order("created_at", { ascending: false }).limit(200);
-  if (error) throw error;
-  const notifications = data || [];
-  const unread = notifications.filter((item) => !item.is_read && (item.status || "open") === "open").length;
-  const open = notifications.filter((item) => (item.status || "open") === "open");
-  const resolved = notifications.filter((item) => item.status === "resolved");
-  const visible = state.notificationFilter === "unread"
-    ? notifications.filter((item) => !item.is_read && (item.status || "open") === "open")
-    : state.notificationFilter === "resolved"
-      ? resolved
-      : state.notificationFilter === "all"
-        ? notifications
-        : open;
-  state.notificationUnreadCount = unread;
-  content.innerHTML = `
-    ${pageHead("NotificaÃ§Ãµes", "Consulte tarefas, prazos e alertas direcionados ao seu trabalho.", unread ? `<button class="btn btn-secondary" data-read-all-notifications>${icon("check")} Marcar todas como lidas</button>` : "")}
-    <section class="notification-summary">${metric("NÃ£o lidas", unread, "bell")}${metric("Em aberto", open.length, "tasks")}${metric("Resolvidas", resolved.length, "check")}</section>
-    <nav class="operations-tabs" aria-label="Filtros de notificaÃ§Ãµes">${[["open", "Em aberto", open.length], ["unread", "NÃ£o lidas", unread], ["resolved", "Resolvidas", resolved.length], ["all", "Todas", notifications.length]].map(([value, label, count]) => `<button class="${state.notificationFilter === value ? "active" : ""}" data-notification-filter="${value}">${label}<span>${count}</span></button>`).join("")}</nav>
-    <section class="card notification-list">
-      ${visible.length ? visible.map((item) => {
-        const destination = item.target_view || (item.entity_type === "task" ? "tasks" : item.entity_type === "pipeline_item" ? "pipelines" : "notifications");
-        const canOpen = destination !== "notifications" && canAccessView(destination);
-        return `<article class="notification-row ${item.is_read ? "" : "unread"}">
-        <span class="notification-symbol notification-${item.kind}">${icon(item.kind === "urgent" || item.kind === "attention" ? "alert" : item.kind === "task" ? "tasks" : "bell")}</span>
-        <div><div class="notification-title"><strong>${escapeHtml(item.title)}</strong>${item.is_read ? "" : `<span>Nova</span>`}${item.status === "resolved" ? `<span class="notification-resolved">Resolvida</span>` : ""}</div><p>${escapeHtml(item.message)}</p><small>${item.due_at ? `Prazo ${formatDate(item.due_at, true)} Â· ` : ""}${formatDate(item.created_at, true)}</small></div>
-        <div class="notification-actions">${canOpen ? `<button class="btn btn-small btn-secondary" data-open-notification="${item.id}" data-notification-target="${destination}">Abrir</button>` : ""}${!item.is_read ? `<button class="text-link" data-read-notification="${item.id}">Marcar como lida</button>` : ""}${(item.status || "open") === "open" ? `<button class="text-link" data-dismiss-notification="${item.id}">Dispensar</button>` : ""}</div>
-      </article>`;
-      }).join("") : emptyState("Nenhuma notificaÃ§Ã£o nesta visÃ£o", "Os avisos aparecem aqui quando uma tarefa ou prazo exige sua atenÃ§Ã£o.")}
-    </section>
-  `;
-}
-
-async function renderAutomations(content) {
-  const canEmail = hasPermission("finance.read");
-  const canDocuments = hasPermission("documents.read");
-  const canBanking = hasPermission("finance.read");
-  const [runsResult, alertsResult, emailsResult, generationsResult, bankingResult] = await Promise.all([
-    supabase.from("automation_runs").select("*").order("started_at", { ascending: false }).limit(30),
-    supabase.from("operational_alerts").select("*").order("last_seen_at", { ascending: false }).limit(150),
-    canEmail ? supabase.from("email_deliveries").select("*").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
-    canDocuments ? supabase.from("document_generations").select("*").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
-    canBanking ? supabase.from("banking_integrations").select("*").order("created_at", { ascending: false }).limit(10) : Promise.resolve({ data: [], error: null }),
-  ]);
-  const failed = [runsResult, alertsResult, emailsResult, generationsResult, bankingResult].find((result) => result.error);
-  if (failed) throw failed.error;
-  const runs = runsResult.data || [];
-  const alerts = alertsResult.data || [];
-  const emails = emailsResult.data || [];
-  const generations = generationsResult.data || [];
-  const banking = bankingResult.data || [];
-  const activeAlerts = alerts.filter((item) => item.status === "active");
-  const latestRun = runs[0];
-  const tabs = [
-    ["overview", "VisÃ£o geral", activeAlerts.length],
-    ...(canEmail ? [["emails", "E-mails", emails.length]] : []),
-    ...(canDocuments ? [["documents", "Documentos", generations.length]] : []),
-    ...(canBanking ? [["banking", "Bradesco", banking.length]] : []),
-    ["history", "HistÃ³rico", runs.length],
-  ];
-  if (!tabs.some(([value]) => value === state.automationTab)) state.automationTab = "overview";
-  const actions = state.automationTab === "emails" && hasPermission("finance.manage")
-    ? `<button class="btn btn-primary" data-dialog="email-draft">${icon("mail")} Preparar e-mail</button>`
-    : state.automationTab === "documents" && hasPermission("documents.manage")
-      ? `<button class="btn btn-primary" data-dialog="document-generation">${icon("plus")} Gerar documento</button>`
-      : state.automationTab === "banking" && hasPermission("finance.manage")
-        ? `<button class="btn btn-primary" data-dialog="banking-integration">${icon("plus")} Configurar Bradesco</button>`
-        : state.automationTab === "overview" && hasPermission("operations.manage")
-          ? `<button class="btn btn-primary" data-run-automations>${icon("arrow")} Atualizar agora</button>`
-          : "";
-
-  let body = "";
-  if (state.automationTab === "overview") {
-    body = `<section class="metric-grid">${metric("Alertas ativos", activeAlerts.length, "alert")}${metric("Urgentes", activeAlerts.filter((item) => item.severity === "urgent").length, "clock")}${metric("Tarefas geradas", latestRun?.tasks_open ?? 0, "tasks")}${metric("Ãšltima atualizaÃ§Ã£o", latestRun ? formatDate(latestRun.finished_at || latestRun.started_at, true) : "Ainda nÃ£o executada", "history")}</section>
-      <section class="card"><div class="card-head"><div><span class="eyebrow">Controle operacional</span><h2>O que o Portal automatiza</h2></div></div><div class="automation-principles"><div>${icon("check")}<span><strong>Faz automaticamente</strong><small>Identifica prazos, evita avisos duplicados, cria lembretes e encerra pendÃªncias derivadas quando a origem Ã© resolvida.</small></span></div><div>${icon("shield")}<span><strong>Permanece com a equipe</strong><small>AprovaÃ§Ãµes, decisÃµes financeiras, contrataÃ§Ãµes, desligamentos, envio externo e revisÃ£o final de documentos.</small></span></div></div></section>
-      <section class="card"><div class="card-head"><div><span class="eyebrow">Alertas atuais</span><h2>ProvidÃªncias identificadas</h2></div></div><div class="people-list">${activeAlerts.length ? activeAlerts.map((item) => operationalRow(item.title, `${item.message}${item.due_on ? ` Â· referÃªncia ${formatDate(item.due_on)}` : ""}`, item.severity === "urgent" ? "Urgente" : item.severity === "attention" ? "AtenÃ§Ã£o" : "Informativo", `<button class="btn btn-small btn-secondary" data-nav="${({ contract: "contracts", admission: "admissions", document: "documents", task: "tasks", accounting: "accounting", termination: "terminations", leave: "leaves", vacancy: "vacancies", recruitment: "vacancies", finance: "finance", academic: "courses" })[item.category] || "overview"}">Abrir Ã¡rea</button>`)).join("") : emptyState("Nenhum alerta ativo", "A rotina automÃ¡tica nÃ£o encontrou pendÃªncias dentro dos critÃ©rios configurados.")}</div></section>`;
-  }
-  if (state.automationTab === "emails") {
-    const labels = { draft: "Rascunho", approved: "Aprovado", queued: "Na fila", sending: "Enviando", sent: "Enviado", failed: "Falhou", cancelled: "Cancelado" };
-    body = `<section class="card phase-note">${icon("shield")}<div><strong>Envio sob confirmaÃ§Ã£o humana</strong><p>O Portal prepara e registra o e-mail. Uma pessoa autorizada confere destinatÃ¡rio, assunto, conteÃºdo e anexo antes de enviar.</p></div></section><section class="card"><div class="people-list">${emails.length ? emails.map((item) => operationalRow(item.subject, `${item.recipient_email} Â· ${formatDate(item.created_at, true)}${item.error_message ? ` Â· ${item.error_message}` : ""}`, labels[item.status] || item.status, `<div class="person-actions">${["draft", "failed", "approved"].includes(item.status) && hasPermission("finance.manage") ? `<button class="btn btn-small btn-secondary" data-edit-email-draft="${item.id}">${icon("edit")} Conferir</button><button class="btn btn-small btn-primary" data-send-email="${item.id}">Enviar</button>` : ""}</div>`)).join("") : emptyState("Nenhum e-mail preparado", "Crie um rascunho a partir de um modelo e confira antes do envio.", hasPermission("finance.manage") ? `<button class="btn btn-primary" data-dialog="email-draft">Preparar e-mail</button>` : "")}</div></section>`;
-  }
-  if (state.automationTab === "documents") {
-    const labels = { draft: "Aguardando revisÃ£o", approved: "Aprovado", rejected: "Rejeitado" };
-    body = `<section class="card phase-note">${icon("upload")}<div><strong>PDF com protocolo e versÃ£o</strong><p>Documentos gerados entram como rascunho. O arquivo sÃ³ deve ser usado externamente depois da conferÃªncia e aprovaÃ§Ã£o da equipe.</p></div></section><section class="card"><div class="people-list">${generations.length ? generations.map((item) => operationalRow(item.title, `VersÃ£o ${item.version} Â· ${formatDate(item.created_at, true)}${item.notes ? ` Â· ${item.notes}` : ""}`, labels[item.status] || item.status, `<div class="person-actions">${item.document_id ? `<button class="btn btn-small btn-secondary" data-download-document="${item.document_id}">${icon("download")} Baixar</button>` : ""}${item.status === "draft" && hasPermission("documents.manage") ? `<button class="btn btn-small btn-primary" data-review-generation="${item.id}" data-review-status="approved">Aprovar</button><button class="btn btn-small btn-quiet" data-review-generation="${item.id}" data-review-status="rejected">Rejeitar</button>` : ""}</div>`)).join("") : emptyState("Nenhum documento gerado", "Use um modelo para criar um PDF vinculado ao cadastro real.", hasPermission("documents.manage") ? `<button class="btn btn-primary" data-dialog="document-generation">Gerar documento</button>` : "")}</div></section>`;
-  }
-  if (state.automationTab === "banking") {
-    const labels = { awaiting_documents: "Aguardando documentaÃ§Ã£o", configuring: "Em configuraÃ§Ã£o", homologation: "Em homologaÃ§Ã£o", active: "Ativa", inactive: "Inativa" };
-    body = `<section class="card banking-readiness"><div class="card-head"><div><span class="eyebrow">IntegraÃ§Ã£o bancÃ¡ria</span><h2>PreparaÃ§Ã£o para o Bradesco</h2></div><span class="status status-draft">Sem conexÃ£o automÃ¡tica</span></div><p>O cadastro abaixo organiza as informaÃ§Ãµes necessÃ¡rias. A emissÃ£o de boletos, CNAB e conciliaÃ§Ã£o sÃ³ serÃ¡ ativada apÃ³s receber o leiaute oficial, convÃªnio, carteira, credenciais e homologaÃ§Ã£o do banco.</p><div class="readiness-checklist"><span>${icon("check")} ConvÃªnio e carteira</span><span>${icon("check")} Leiaute CNAB oficial</span><span>${icon("check")} Credenciais ou canal de troca</span><span>${icon("check")} HomologaÃ§Ã£o com o banco</span></div></section><section class="card"><div class="people-list">${banking.length ? banking.map((item) => operationalRow(`${item.provider} Â· ${item.integration_mode.toUpperCase()}`, `Banco ${item.bank_code}${item.agreement_number ? ` Â· convÃªnio ${item.agreement_number}` : " Â· convÃªnio nÃ£o informado"}${item.layout_version ? ` Â· leiaute ${item.layout_version}` : ""}`, labels[item.status] || item.status, hasPermission("finance.manage") ? `<button class="btn btn-small btn-secondary" data-edit-banking-integration="${item.id}">${icon("edit")} Alterar</button>` : "")).join("") : emptyState("IntegraÃ§Ã£o ainda nÃ£o configurada", "Cadastre somente os dados confirmados pelo gerente do Bradesco; nenhum boleto serÃ¡ emitido nesta etapa.", hasPermission("finance.manage") ? `<button class="btn btn-primary" data-dialog="banking-integration">Iniciar configuraÃ§Ã£o</button>` : "")}</div></section>`;
-  }
-  if (state.automationTab === "history") {
-    const labels = { completed: "ConcluÃ­da", failed: "Falhou", running: "Em execuÃ§Ã£o" };
-    body = `<section class="card"><div class="people-list">${runs.length ? runs.map((item) => operationalRow(item.run_source === "manual" ? "AtualizaÃ§Ã£o solicitada pela equipe" : item.run_source === "schedule" ? "AtualizaÃ§Ã£o agendada" : "AtualizaÃ§Ã£o do sistema", `${formatDate(item.started_at, true)} Â· ${item.alerts_active} alertas Â· ${item.notifications_open} notificaÃ§Ãµes Â· ${item.tasks_open} tarefas${item.error_message ? ` Â· ${item.error_message}` : ""}`, labels[item.status] || item.status)).join("") : emptyState("Nenhuma execuÃ§Ã£o registrada", "O histÃ³rico serÃ¡ formado nas prÃ³ximas atualizaÃ§Ãµes.")}</div></section>`;
-  }
-  content.innerHTML = `${pageHead("AutomaÃ§Ãµes", "Reduza controles repetitivos sem retirar da equipe as decisÃµes importantes.", actions)}<nav class="operations-tabs" aria-label="Ãreas de automaÃ§Ã£o">${tabs.map(([value, label, count]) => `<button class="${state.automationTab === value ? "active" : ""}" data-automation-tab="${value}">${label}<span>${count}</span></button>`).join("")}</nav>${body}`;
-}
-
-function indicatorValue(metric) {
-  const value = Number(metric?.value || 0);
-  if (metric?.format === "currency") return formatMoney(value);
-  if (metric?.format === "percent") return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value)}%`;
-  if (metric?.format === "hours") return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value)} h`;
-  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value);
-}
-
-function indicatorGroups(metrics) {
-  return [...new Set((metrics || []).map((item) => item.group).filter(Boolean))];
-}
-
-function indicatorGroupLabel(group) {
-  return ({ operations: "OperaÃ§Ãµes", companies: "Empresas", apprentices: "Jovens", vacancies: "Vagas", personnel: "Departamento Pessoal", contracts: "Contratos", academic: "AcadÃªmico", finance: "Financeiro" })[group] || group;
-}
-
-function indicatorTargetStatus(metric, target) {
-  if (!target) return "";
-  const value = Number(metric.value || 0);
-  const goal = Number(target.target_value || 0);
-  const reached = target.comparison === "maximum" ? value <= goal : value >= goal;
-  return `<small class="indicator-goal ${reached ? "reached" : "pending"}">${reached ? "Meta dentro do esperado" : "Meta a acompanhar"} Â· ${target.comparison === "maximum" ? "atÃ©" : "mÃ­nimo"} ${indicatorValue({ value: goal, format: metric.format })}</small>`;
-}
-
-function csvForIndicators(report) {
-  const rows = [["grupo", "indicador", "valor", "formato", "perÃ­odo_inÃ­cio", "perÃ­odo_fim"]];
-  for (const metric of report.metrics || []) rows.push([indicatorGroupLabel(metric.group), metric.label, metric.value, metric.format, report.period?.start || "", report.period?.end || ""]);
-  return `\uFEFF${rows.map((row) => row.map(csvCell).join(";")).join("\n")}\n`;
-}
-
-async function renderIndicators(content) {
-  const today = new Date().toISOString().slice(0, 10);
-  if (!state.indicatorEnd) state.indicatorEnd = today;
-  if (!state.indicatorStart) {
-    const start = new Date();
-    start.setDate(start.getDate() - 29);
-    state.indicatorStart = start.toISOString().slice(0, 10);
-  }
-  const [{ data: report, error }, { data: logs, error: logsError }, { data: tasks, error: tasksError }, { data: processes, error: processesError }] = await Promise.all([
-    supabase.rpc("get_portal_indicators", { period_start_value: state.indicatorStart, period_end_value: state.indicatorEnd }),
-    supabase.from("work_activity_logs").select("*").order("started_at", { ascending: false }).limit(20),
-    supabase.from("tasks").select("id,title").not("status", "in", "(completed,cancelled)").order("due_at", { ascending: true, nullsFirst: false }).limit(100),
-    supabase.from("pipeline_items").select("id,title").eq("is_archived", false).is("closed_at", null).order("last_moved_at", { ascending: false }).limit(100),
-  ]);
-  if (error || logsError || tasksError || processesError) throw error || logsError || tasksError || processesError;
-  const metrics = (report?.metrics || []).filter((item) => state.indicatorGroup === "all" || item.group === state.indicatorGroup);
-  const targetMap = new Map((report?.targets || []).map((target) => [target.metric_key, target]));
-  const groups = indicatorGroups(report?.metrics);
-  const bottlenecks = report?.bottlenecks || [];
-  const stages = (report?.stages || []).filter((stage) => Number(stage.count) > 0 || Number(stage.average_days) > 0);
-  const productivity = report?.productivity || {};
-  const canManageTargets = profileDepartment() === "management";
-  const activeLog = (logs || []).find((log) => log.status === "running");
-  const canExport = hasPermission("reports.export");
-  content.innerHTML = `
-    ${pageHead("Indicadores e relatÃ³rios", report?.visibility === "institution" ? "VisÃ£o institucional com dados reais. Metas sÃ£o definidas apenas pela DireÃ§Ã£o." : "VisÃ£o do seu departamento e do seu prÃ³prio registro de trabalho.", canExport ? `<button class="btn btn-secondary" data-export-indicators>${icon("download")} Exportar CSV</button>` : "")}
-    <section class="card indicator-filter-card"><form id="indicator-filter-form" class="indicator-filter"><label>InÃ­cio<input type="date" name="start" value="${state.indicatorStart}" max="${today}" required /></label><label>Fim<input type="date" name="end" value="${state.indicatorEnd}" max="${today}" required /></label><label>Ãrea<select name="group"><option value="all">Todas as Ã¡reas permitidas</option>${groups.map((group) => `<option value="${group}" ${state.indicatorGroup === group ? "selected" : ""}>${indicatorGroupLabel(group)}</option>`).join("")}</select></label><button class="btn btn-primary" type="submit">Atualizar relatÃ³rio</button></form></section>
-    <section class="metric-grid indicator-metrics">${metrics.map((item) => `<button class="metric indicator-metric" data-nav="${item.destination}" ${canAccessView(item.destination) ? "" : "disabled"}><span class="metric-icon">${icon(item.group === "finance" ? "calendar" : item.group === "academic" ? "book" : item.group === "operations" ? "kanban" : "grid")}</span><span><small>${escapeHtml(item.label)}</small><strong>${indicatorValue(item)}</strong>${indicatorTargetStatus(item, targetMap.get(item.key))}</span></button>`).join("") || emptyState("Sem indicadores nesta Ã¡rea", "O seu departamento nÃ£o possui indicadores liberados para este recorte.")}</section>
-    <section class="indicator-layout">
-      <article class="card"><div class="card-head"><div><span class="eyebrow">Precisa da sua atenÃ§Ã£o</span><h2>${bottlenecks.length ? "Gargalos e pendÃªncias" : "Nenhum gargalo identificado"}</h2></div></div>${bottlenecks.length ? `<div class="indicator-list">${bottlenecks.map((item) => `<button data-nav="${item.destination}"><span class="indicator-severity ${escapeHtml(item.severity)}">${item.severity === "urgent" ? icon("alert") : icon("clock")}</span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}${item.due_on ? ` Â· referÃªncia ${formatDate(item.due_on)}` : ""}</small></span></button>`).join("")}</div>` : `<p class="muted-note">Os alertas ativos aparecerÃ£o aqui quando houver algo que exija providÃªncia.</p>`}</article>
-      <article class="card"><div class="card-head"><div><span class="eyebrow">Carga operacional</span><h2>${report?.visibility === "institution" ? "VisÃ£o institucional" : "Meu registro"}</h2></div></div><div class="work-summary"><span><strong>${productivity.recorded_minutes || 0}</strong><small>minutos no perÃ­odo</small></span><span><strong>${productivity.completed_entries || 0}</strong><small>registros concluÃ­dos</small></span><span><strong>${productivity.open_entries || 0}</strong><small>em andamento</small></span></div><p class="muted-note">O registro serve para organizar a carga e melhorar processos. NÃ£o hÃ¡ pontuaÃ§Ã£o, ranking ou vigilÃ¢ncia individual.</p></article>
-    </section>
-    <section class="card"><div class="card-head"><div><span class="eyebrow">Tempo nas etapas</span><h2>DistribuiÃ§Ã£o das esteiras</h2></div></div>${stages.length ? `<div class="stage-report-list">${stages.map((stage) => `<div><span><strong>${escapeHtml(stage.pipeline)}</strong><small>${escapeHtml(stage.stage)}</small></span><b>${stage.count} processo(s)</b><em>${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(Number(stage.average_days || 0))} dias em mÃ©dia</em></div>`).join("")}</div>` : `<p class="muted-note">Quando houver processos em andamento, o tempo mÃ©dio de cada etapa serÃ¡ mostrado aqui.</p>`}</section>
-    <section class="indicator-layout">
-      <article class="card"><div class="card-head"><div><span class="eyebrow">Registro de trabalho</span><h2>Tempo vinculado a tarefas e processos</h2></div></div>${activeLog ? `<div class="active-work-log"><strong>${escapeHtml(activeLog.title)}</strong><small>Em andamento desde ${formatDate(activeLog.active_started_at, true)}</small><div><button class="btn btn-small btn-secondary" data-work-log-action="pause" data-work-log-id="${activeLog.id}">Pausar</button><button class="btn btn-small btn-primary" data-work-log-action="complete" data-work-log-id="${activeLog.id}">Concluir</button></div></div>` : ""}<form id="work-log-form" class="stack-form"><div class="form-grid two-columns"><label>Atividade<input name="title" required minlength="2" maxlength="180" placeholder="Ex.: ConferÃªncia de documentos" /></label><label>Tipo de lanÃ§amento<select name="entryMode"><option value="timer">Iniciar cronÃ´metro</option><option value="manual">LanÃ§ar tempo manual</option></select></label><label>Vincular tarefa<select name="taskId"><option value="">Sem tarefa vinculada</option>${(tasks || []).map((task) => `<option value="${task.id}">${escapeHtml(task.title)}</option>`).join("")}</select></label><label>Vincular processo<select name="pipelineItemId"><option value="">Sem processo vinculado</option>${(processes || []).map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join("")}</select></label><label>Categoria<input name="category" maxlength="80" value="${escapeHtml(profileAccessLabel())}" /></label><label>Minutos <input name="manualMinutes" type="number" min="1" max="10080" placeholder="ObrigatÃ³rio no lanÃ§amento manual" /></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="2" maxlength="4000"></textarea></label><button class="btn btn-primary" type="submit">Salvar registro</button></form>${(logs || []).length ? `<div class="recent-work-logs">${(logs || []).map((log) => `<div><span><strong>${escapeHtml(log.title)}</strong><small>${escapeHtml(log.category)} Â· ${log.entry_mode === "manual" ? `${log.manual_minutes} min` : log.status === "running" ? "em andamento" : `${Math.round(Number(log.accumulated_seconds || 0) / 60)} min`}</small></span><em>${log.status === "completed" ? "ConcluÃ­do" : log.status === "paused" ? "Pausado" : "Em andamento"}</em></div>`).join("")}</div>` : ""}</article>
-      <article class="card"><div class="card-head"><div><span class="eyebrow">Metas institucionais</span><h2>ReferÃªncias da DireÃ§Ã£o</h2></div></div>${(report?.targets || []).length ? `<div class="target-list">${report.targets.map((target) => `<div><span><strong>${escapeHtml(target.label)}</strong><small>${target.department === "all" ? "Institucional" : departmentLabels[target.department] || target.department} Â· ${target.period}</small></span><b>${target.comparison === "maximum" ? "AtÃ©" : "MÃ­nimo"} ${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(Number(target.target_value))}</b>${canManageTargets ? `<button class="text-link" data-delete-indicator-target="${target.id}">Excluir</button>` : ""}</div>`).join("")}</div>` : `<p class="muted-note">Ainda nÃ£o hÃ¡ metas cadastradas. Elas sÃ£o opcionais e nunca sÃ£o preenchidas automaticamente.</p>`}${canManageTargets ? `<form id="indicator-target-form" class="stack-form target-form"><div class="form-section"><span>Nova meta</span></div><div class="form-grid two-columns"><label>Indicador<select name="metricKey" required>${(report?.metrics || []).map((item) => `<option value="${item.key}">${escapeHtml(item.label)}</option>`).join("")}</select></label><label>Nome da meta<input name="label" required minlength="2" maxlength="160" placeholder="Ex.: Reduzir tarefas vencidas" /></label><label>Ãrea<select name="department"><option value="all">Institucional</option>${Object.entries(departmentLabels).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select></label><label>Periodicidade<select name="period"><option value="monthly">Mensal</option><option value="current">Atual</option><option value="quarterly">Trimestral</option><option value="annual">Anual</option></select></label><label>ComparaÃ§Ã£o<select name="comparison"><option value="minimum">No mÃ­nimo</option><option value="maximum">No mÃ¡ximo</option></select></label><label>Valor<input name="targetValue" type="number" min="0" step="0.01" required /></label></div><button class="btn btn-secondary" type="submit">Salvar meta</button></form>` : `<p class="form-note">Somente a DireÃ§Ã£o e AdministraÃ§Ã£o pode criar ou alterar metas.</p>`}</article>
-    </section>`;
-}
-
-async function renderApprentices(content) {
-  const [peopleResult, references, enrollmentResult, progressResult, attemptResult] = await Promise.all([
-    callAdmin({ action: "list_users", scope: "apprentices" }, true),
-    loadOperationalReferences(),
-    supabase.from("enrollments").select("apprentice_id,course_id"),
-    supabase.from("lesson_progress").select("apprentice_id,lesson_id"),
-    supabase.from("activity_attempts").select("apprentice_id,activity_id,status"),
-  ]);
-  if (enrollmentResult.error || progressResult.error || attemptResult.error) throw enrollmentResult.error || progressResult.error || attemptResult.error;
-  state.people = peopleResult.users || [];
-  const apprentices = state.people.filter((person) => person.role === "apprentice");
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const countBy = (rows, key) => rows.reduce((map, item) => map.set(item[key], (map.get(item[key]) || 0) + 1), new Map());
-  const enrollmentCount = countBy(enrollmentResult.data || [], "apprentice_id");
-  const progressCount = countBy(progressResult.data || [], "apprentice_id");
-  const attemptCount = countBy(attemptResult.data || [], "apprentice_id");
-  const activeCount = apprentices.filter((person) => person.isActive).length;
-  const canCreateApprentice = hasPermission("people.manage");
-  const canReadHistory = hasPermission("apprentice.history.read") || hasPermission("people.read");
-
-  content.innerHTML = `
-    ${pageHead("Jovens / Aprendizes", "Use o cadastro central do jovem em cursos, empresas, processos e tarefas, sem duplicar informaÃ§Ãµes.", canCreateApprentice ? `<button class="btn btn-primary" data-dialog="invite">${icon("plus")} Cadastrar jovem</button>` : "")}
-    <section class="people-summary"><span><strong>${apprentices.length}</strong> jovens cadastrados</span><span><strong>${activeCount}</strong> ativos</span><span><strong>${apprentices.length - activeCount}</strong> arquivados</span></section>
-    <section class="card">
-      ${apprentices.length ? `<div class="people-list">${apprentices.map((person) => `<article class="person-row apprentice-row">
-        <span class="avatar">${escapeHtml(initials(person.fullName))}</span>
-        <div class="person-main"><strong>${escapeHtml(person.fullName || "Nome nÃ£o informado")}</strong><small>${escapeHtml(person.email || "E-mail nÃ£o disponÃ­vel")}</small><small>${escapeHtml(person.companyId ? companyMap.get(person.companyId) || "Empresa vinculada" : "Sem empresa vinculada")}</small></div>
-        <div class="person-access"><span class="status ${person.isActive ? "status-published" : "status-archived"}">${person.isActive ? "Ativo" : "Arquivado"}</span></div>
-        <div class="apprentice-metrics"><span><strong>${enrollmentCount.get(person.id) || 0}</strong> cursos</span><span><strong>${progressCount.get(person.id) || 0}</strong> aulas concluÃ­das</span><span><strong>${attemptCount.get(person.id) || 0}</strong> atividades</span></div>
-        <div class="person-actions">${canReadHistory ? `<button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} HistÃ³rico</button>` : ""}${canManagePerson(person) && person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Alterar</button>` : ""}</div>
-      </article>`).join("")}</div>` : emptyState("Nenhum jovem cadastrado", canCreateApprentice ? "Cadastre o primeiro jovem para vinculÃ¡-lo Ã  empresa, aos cursos e aos processos." : "Nenhum jovem estÃ¡ disponÃ­vel para consulta.", canCreateApprentice ? `<button class="btn btn-primary" data-dialog="invite">Cadastrar jovem</button>` : "")}
-    </section>
-  `;
-}
-
-async function renderCompanies(content) {
-  const [{ data, error }, { data: linkedProfiles }] = await Promise.all([
-    supabase.from("companies").select("*").order("is_active", { ascending: false }).order("name"),
-    supabase.from("profiles").select("company_id").not("company_id", "is", null),
-  ]);
-  if (error) throw error;
-  const linkedCount = new Map();
-  for (const profile of linkedProfiles || []) {
-    linkedCount.set(profile.company_id, (linkedCount.get(profile.company_id) || 0) + 1);
-  }
-
-  const canManageCompanies = hasPermission("companies.manage");
-  content.innerHTML = `
-    ${pageHead("Empresas parceiras", "Mantenha identificaÃ§Ã£o, contatos e situaÃ§Ã£o de cada organizaÃ§Ã£o acompanhada pela CAFCM.",
-      canManageCompanies ? `<button class="btn btn-primary" data-dialog="company">${icon("plus")} Nova empresa</button>` : "")}
-    ${data.length ? `<section class="company-grid">
-      ${data.map((company) => {
-        const address = [company.street, company.street_number, company.district, company.city, company.state].filter(Boolean).join(", ");
-        const people = linkedCount.get(company.id) || 0;
-        return `<article class="company-card ${company.is_active ? "" : "company-inactive"}">
-          <header class="company-card-head">
-            <span class="company-mark">${icon("building")}</span>
-            <div><h2>${escapeHtml(company.name)}</h2><p>${escapeHtml(company.legal_name || "RazÃ£o social nÃ£o informada")}</p></div>
-            <span class="status ${company.is_active ? "status-published" : "status-archived"}">${company.is_active ? "Ativa" : "Inativa"}</span>
-          </header>
-          <div class="company-facts">
-            <div><small>CNPJ</small><strong>${escapeHtml(formatCnpj(company.cnpj))}</strong></div>
-            <div><small>Pessoas vinculadas</small><strong>${people}</strong></div>
-            <div><small>Contato</small><strong>${escapeHtml(company.contact_name || "NÃ£o informado")}</strong><span>${escapeHtml([company.contact_role, company.contact_email || company.email || formatPhone(company.contact_phone || company.phone)].filter(Boolean).join(" Â· "))}</span></div>
-            <div><small>LocalizaÃ§Ã£o</small><strong>${escapeHtml(address || "EndereÃ§o nÃ£o informado")}</strong></div>
-          </div>
-          ${canManageCompanies ? `<footer class="company-actions">
-            <button class="btn btn-small btn-secondary" data-edit-company="${company.id}">${icon("edit")} Alterar</button>
-            <button class="btn btn-small btn-quiet" data-toggle-company="${company.id}" data-company-active="${company.is_active}">${company.is_active ? "Inativar" : "Reativar"}</button>
-            <button class="icon-btn danger-button" data-delete-company="${company.id}" data-company-name="${escapeHtml(company.name)}" aria-label="Excluir ${escapeHtml(company.name)}">${icon("trash")}</button>
-          </footer>` : ""}
-        </article>`;
-      }).join("")}
-    </section>` : `<section class="card">${emptyState("Nenhuma empresa cadastrada", canManageCompanies ? "Cadastre a primeira empresa para depois vincular seus representantes e aprendizes." : "Nenhuma empresa estÃ¡ disponÃ­vel para consulta.", canManageCompanies ? `<button class="btn btn-primary" data-dialog="company">Cadastrar empresa</button>` : "")}</section>`}
-  `;
-}
-
-function operationalRow(title, detail, status, actions = "") {
-  return `<article class="person-row"><span class="avatar">${icon("tasks")}</span><div class="person-main"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail || "Sem informaÃ§Ãµes adicionais")}</small></div><div class="person-access">${status ? `<span class="status status-draft">${escapeHtml(status)}</span>` : ""}</div><div class="person-actions">${actions}</div></article>`;
-}
-
-async function renderVacancies(content) {
-  const [candidates, vacancies, applications, documents, references] = await Promise.all([
-    supabase.from("candidates").select("*").order("created_at", { ascending: false }),
-    supabase.from("job_vacancies").select("*").order("created_at", { ascending: false }),
-    supabase.from("vacancy_applications").select("*").order("updated_at", { ascending: false }),
-    supabase.from("candidate_documents").select("id,candidate_id"),
-    loadOperationalReferences(),
-  ]);
-  if (candidates.error || vacancies.error || applications.error || documents.error) throw candidates.error || vacancies.error || applications.error || documents.error;
-  const canManageVacancies = hasPermission("vacancies.manage");
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const candidateMap = new Map((candidates.data || []).map((item) => [item.id, item]));
-  const vacancyMap = new Map((vacancies.data || []).map((item) => [item.id, item]));
-  const active = (vacancies.data || []).filter((item) => item.status === "open");
-  const activeApplications = (applications.data || []).filter((item) => !["rejected", "withdrawn", "hired"].includes(item.status));
-  const filledMap = new Map();
-  const selectionMap = new Map();
-  const documentMap = new Map();
-  for (const item of applications.data || []) {
-    if (item.status === "hired") filledMap.set(item.vacancy_id, (filledMap.get(item.vacancy_id) || 0) + 1);
-    selectionMap.set(item.candidate_id, (selectionMap.get(item.candidate_id) || 0) + 1);
-  }
-  for (const item of documents.data || []) documentMap.set(item.candidate_id, (documentMap.get(item.candidate_id) || 0) + 1);
-
-  const search = state.vacancySearch.trim().toLocaleLowerCase("pt-BR");
-  const matchesSearch = (...parts) => !search || parts.filter(Boolean).join(" ").toLocaleLowerCase("pt-BR").includes(search);
-  const filteredVacancies = (vacancies.data || []).filter((item) => matchesSearch(item.title, companyMap.get(item.company_id), item.location, item.requirements)
-    && (!state.vacancyStatus || item.status === state.vacancyStatus)
-    && (!state.vacancyCompany || item.company_id === state.vacancyCompany));
-  const filteredCandidates = (candidates.data || []).filter((item) => matchesSearch(item.full_name, item.email, item.phone, item.cpf, item.city)
-    && (!state.vacancyStatus || item.status === state.vacancyStatus)
-    && (!state.vacancyCompany || (applications.data || []).some((application) => application.candidate_id === item.id && vacancyMap.get(application.vacancy_id)?.company_id === state.vacancyCompany)));
-  const filteredApplications = (applications.data || []).filter((item) => {
-    const candidate = candidateMap.get(item.candidate_id);
-    const vacancy = vacancyMap.get(item.vacancy_id);
-    return matchesSearch(candidate?.full_name, candidate?.email, vacancy?.title, companyMap.get(vacancy?.company_id))
-      && (!state.vacancyStatus || item.status === state.vacancyStatus)
-      && (!state.vacancyCompany || vacancy?.company_id === state.vacancyCompany);
-  });
-
-  const statusLabels = state.vacancyTab === "candidates" ? candidateStatusLabels : state.vacancyTab === "applications" ? applicationStatusLabels : vacancyStatusLabels;
-  const tabs = [
-    ["overview", "Resumo", "grid", ""],
-    ["vacancies", "Vagas", "kanban", (vacancies.data || []).length],
-    ["candidates", "Candidatos", "users", (candidates.data || []).length],
-    ["applications", "SeleÃ§Ãµes", "tasks", (applications.data || []).length],
-  ];
-  const actions = canManageVacancies ? `<button class="btn btn-secondary" data-dialog="candidate">${icon("plus")} Candidato</button><button class="btn btn-secondary" data-dialog="application">${icon("link")} Iniciar seleÃ§Ã£o</button><button class="btn btn-primary" data-dialog="vacancy">${icon("plus")} Abrir vaga</button>` : "";
-
-  const vacancyRows = filteredVacancies.map((item) => {
-    const filled = filledMap.get(item.id) || 0;
-    const remaining = Math.max(item.quantity - filled, 0);
-    const detail = `${companyMap.get(item.company_id) || "Empresa"} Â· ${filled}/${item.quantity} preenchida(s) Â· ${remaining} disponÃ­vel(is)${item.due_date ? ` Â· prazo ${formatDate(item.due_date)}` : ""}`;
-    return operationalRow(item.title, detail, vacancyStatusLabels[item.status] || item.status, canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-vacancy="${item.id}">${icon("edit")} Alterar</button>` : "");
-  }).join("");
-  const candidateRows = filteredCandidates.map((item) => operationalRow(
-    item.full_name,
-    `${item.email || "Sem e-mail"}${item.phone ? ` Â· ${formatPhone(item.phone)}` : ""}${item.city ? ` Â· ${item.city}` : ""} Â· ${selectionMap.get(item.id) || 0} seleÃ§Ã£o(Ãµes) Â· ${documentMap.get(item.id) || 0} arquivo(s)`,
-    candidateStatusLabels[item.status] || item.status,
-    canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-candidate="${item.id}">${icon("edit")} Abrir</button><button class="btn btn-small btn-quiet" data-archive-candidate="${item.id}" data-candidate-archived="${item.status === "archived"}">${item.status === "archived" ? "Reativar" : "Arquivar"}</button>` : "",
-  )).join("");
-  const applicationRows = filteredApplications.map((item) => {
-    const candidate = candidateMap.get(item.candidate_id);
-    const vacancy = vacancyMap.get(item.vacancy_id);
-    const canConvert = item.status === "approved";
-    const rowActions = canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-application="${item.id}">${icon("edit")} Atualizar</button>${canConvert ? `<button class="btn btn-small btn-primary" data-convert-candidate="${item.id}">${icon("arrow")} Iniciar admissÃ£o</button>` : ""}` : "";
-    return operationalRow(candidate?.full_name || "Candidato", `${vacancy?.title || "Vaga"} Â· ${companyMap.get(vacancy?.company_id) || "Empresa"}${item.company_interview_at ? ` Â· entrevista ${formatDate(item.company_interview_at, true)}` : ""}`, applicationStatusLabels[item.status] || item.status, rowActions);
-  }).join("");
-
-  let panel = "";
-  if (state.vacancyTab === "overview") {
-    panel = `<div class="operations-split"><section class="card"><div class="card-head"><div><span class="eyebrow">Vagas abertas</span><h2>Demanda atual</h2></div><button class="text-link" data-vacancy-tab="vacancies">Ver todas</button></div>${active.length ? `<div class="people-list">${active.slice(0, 6).map((item) => { const filled = filledMap.get(item.id) || 0; return operationalRow(item.title, `${companyMap.get(item.company_id) || "Empresa"} Â· ${Math.max(item.quantity - filled, 0)} vaga(s) disponÃ­vel(is)`, "Aberta", canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-vacancy="${item.id}">Abrir</button>` : ""); }).join("")}</div>` : emptyState("Nenhuma vaga aberta", "Cadastre a demanda recebida de uma empresa parceira.")}</section><section class="card"><div class="card-head"><div><span class="eyebrow">Recrutamento</span><h2>SeleÃ§Ãµes em andamento</h2></div><button class="text-link" data-vacancy-tab="applications">Ver todas</button></div>${activeApplications.length ? `<div class="people-list">${activeApplications.slice(0, 6).map((item) => { const candidate = candidateMap.get(item.candidate_id); const vacancy = vacancyMap.get(item.vacancy_id); return operationalRow(candidate?.full_name || "Candidato", `${vacancy?.title || "Vaga"} Â· ${companyMap.get(vacancy?.company_id) || "Empresa"}`, applicationStatusLabels[item.status] || item.status, canManageVacancies ? `<button class="btn btn-small btn-secondary" data-edit-application="${item.id}">Atualizar</button>` : ""); }).join("")}</div>` : emptyState("Nenhuma seleÃ§Ã£o em andamento", "Inclua um candidato em uma vaga para iniciar o acompanhamento.")}</section></div>`;
-  } else {
-    const rows = state.vacancyTab === "vacancies" ? vacancyRows : state.vacancyTab === "candidates" ? candidateRows : applicationRows;
-    const empty = state.vacancyTab === "vacancies" ? ["Nenhuma vaga encontrada", "Altere os filtros ou abra uma nova vaga."] : state.vacancyTab === "candidates" ? ["Nenhum candidato encontrado", "Altere os filtros ou cadastre um candidato."] : ["Nenhuma seleÃ§Ã£o encontrada", "Altere os filtros ou inicie um processo seletivo."];
-    panel = `<section class="card"><div class="operations-toolbar"><label class="search-field">${icon("search")}<input data-vacancy-search value="${escapeHtml(state.vacancySearch)}" placeholder="Buscar por nome, e-mail, vaga ou empresa" aria-label="Buscar" /></label><select data-vacancy-filter="status" aria-label="Filtrar por situaÃ§Ã£o"><option value="">Todas as situaÃ§Ãµes</option>${selectOptions(statusLabels, state.vacancyStatus)}</select><select data-vacancy-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.vacancyCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${state.vacancySearch || state.vacancyStatus || state.vacancyCompany ? `<button class="btn btn-quiet" data-clear-vacancy-filters>Limpar</button>` : ""}</div>${rows ? `<div class="people-list">${rows}</div>` : emptyState(empty[0], empty[1])}</section>`;
-  }
-
-  content.innerHTML = `${pageHead("GestÃ£o de vagas", "Da abertura da vaga Ã  admissÃ£o do jovem, com histÃ³rico e etapas sincronizadas.", actions)}
-    <section class="metric-grid">${metric("Empresas ativas", references.companies.filter((item) => item.is_active).length, "building")}${metric("PosiÃ§Ãµes disponÃ­veis", active.reduce((total, item) => total + Math.max(item.quantity - (filledMap.get(item.id) || 0), 0), 0), "kanban")}${metric("Candidatos", (candidates.data || []).filter((item) => item.status !== "archived").length, "users")}${metric("Em seleÃ§Ã£o", activeApplications.length, "tasks")}</section>
-    <nav class="operations-tabs" aria-label="Ãreas da gestÃ£o de vagas">${tabs.map(([value, label, iconName, count]) => `<button class="${state.vacancyTab === value ? "active" : ""}" data-vacancy-tab="${value}">${icon(iconName)} ${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>
-    ${panel}`;
-}
-
-async function renderPartnerships(content) {
-  const [agreements, references] = await Promise.all([
-    supabase.from("partnership_agreements").select("*").order("created_at", { ascending: false }),
-    loadOperationalReferences(),
-  ]);
-  if (agreements.error) throw agreements.error;
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const activeYoung = new Map();
-  for (const apprentice of references.apprentices) {
-    if (apprentice.company_id) activeYoung.set(apprentice.company_id, (activeYoung.get(apprentice.company_id) || 0) + 1);
-  }
-  const statusLabels = { draft: "Rascunho", active: "Ativa", expiring: "PrÃ³xima do fim", ended: "Encerrada", cancelled: "Cancelada" };
-  content.innerHTML = `${pageHead("Parcerias e jovens", "Acompanhe os convÃªnios com as empresas e os jovens vinculados a cada parceira.", `<button class="btn btn-primary" data-dialog="partnership">${icon("plus")} Nova parceria</button>`)}
-    <section class="metric-grid three">${metric("Parcerias ativas", (agreements.data || []).filter((item) => item.status === "active").length, "building")}${metric("Jovens vinculados", references.apprentices.filter((item) => item.company_id).length, "users")}${metric("Parcerias a vencer", (agreements.data || []).filter((item) => item.status === "expiring").length, "alert")}</section>
-    <section class="card"><div class="people-list">${(agreements.data || []).length ? agreements.data.map((item) => operationalRow(companyMap.get(item.company_id) || "Empresa", `${item.title} Â· ${activeYoung.get(item.company_id) || 0} jovem(ns) ativo(s) Â· ${item.start_date ? formatDate(item.start_date) : "inÃ­cio nÃ£o informado"}${item.end_date ? ` atÃ© ${formatDate(item.end_date)}` : ""}`, statusLabels[item.status] || item.status, `<button class="btn btn-small btn-secondary" data-edit-partnership="${item.id}">${icon("edit")} Alterar</button>`)).join("") : emptyState("Nenhuma parceria cadastrada", "Registre o convÃªnio firmado com uma empresa parceira.", `<button class="btn btn-primary" data-dialog="partnership">Registrar parceria</button>`)}</div></section>`;
-}
-
-async function renderAdmissions(content) {
-  const [{ data: admissions, error }, references, { data: checklist }] = await Promise.all([
-    supabase.from("admission_cases").select("*").order("created_at", { ascending: false }),
-    loadOperationalReferences(),
-    supabase.from("admission_checklist_items").select("admission_id,is_required,is_completed"),
-  ]);
-  if (error) throw error;
-  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const checklistMap = new Map();
-  for (const item of checklist || []) {
-    const current = checklistMap.get(item.admission_id) || { required: 0, complete: 0 };
-    current.required += item.is_required ? 1 : 0;
-    current.complete += item.is_required && item.is_completed ? 1 : 0;
-    checklistMap.set(item.admission_id, current);
-  }
-  const openAdmissions = (admissions || []).filter((item) => !["completed", "cancelled"].includes(item.status));
-  const pendingDocuments = (admissions || []).filter((item) => ["approved", "documents_pending"].includes(item.status));
-  content.innerHTML = `${pageHead("AdmissÃµes", "Acompanhe cada aprovado atÃ© a entrada do jovem, com checklist e esteira sincronizados.", `<button class="btn btn-primary" data-dialog="admission">${icon("plus")} Nova admissÃ£o</button>`)}
-    <section class="metric-grid three">${metric("Em andamento", openAdmissions.length, "tasks")}${metric("Com documentos pendentes", pendingDocuments.length, "upload")}${metric("ConcluÃ­das", (admissions || []).filter((item) => item.status === "completed").length, "check")}</section>
-    <section class="card"><div class="people-list workflow-list">${(admissions || []).length ? admissions.map((item) => {
-      const count = checklistMap.get(item.id) || { required: 0, complete: 0 };
-      const detail = `${companyMap.get(item.company_id) || "Empresa nÃ£o informada"} Â· inÃ­cio previsto ${item.target_start_date ? formatDate(item.target_start_date) : "nÃ£o definido"} Â· checklist ${count.complete}/${count.required}`;
-      return `<article class="workflow-record"><div class="workflow-record-head"><div><h3>${escapeHtml(apprenticeMap.get(item.apprentice_id) || "Jovem nÃ£o identificado")}</h3><p>${escapeHtml(detail)}</p></div><div class="person-actions"><span class="status status-draft">${escapeHtml(admissionStatusLabels[item.status] || item.status)}</span><button class="btn btn-small btn-secondary" data-edit-admission="${item.id}">${icon("edit")} Abrir</button></div></div>${workflowProgress(admissionStatusLabels, item.status)}</article>`;
-    }).join("") : emptyState("Nenhuma admissÃ£o aberta", "Crie a primeira admissÃ£o para gerar o checklist operacional e acompanhar cada etapa.", `<button class="btn btn-primary" data-dialog="admission">Nova admissÃ£o</button>`)}</div></section>`;
-}
-
-async function renderContracts(content) {
-  const [{ data: contracts, error }, references] = await Promise.all([
-    supabase.from("contracts").select("*").order("end_date"), loadOperationalReferences(),
-  ]);
-  if (error) throw error;
-  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const canManageContracts = hasPermission("contracts.manage");
-  const activeContracts = (contracts || []).filter((item) => item.status === "active");
-  const daysRemaining = (item) => item.end_date ? Math.ceil((new Date(`${item.end_date}T23:59:59`).getTime() - Date.now()) / 86400000) : null;
-  const due90 = activeContracts.filter((item) => daysRemaining(item) >= 0 && daysRemaining(item) <= 90);
-  const due30 = activeContracts.filter((item) => daysRemaining(item) >= 0 && daysRemaining(item) <= 30);
-  const contractLabels = { scheduled: "A iniciar", active: "Ativo", closing: "Encerramento", ended: "Encerrado", cancelled: "Cancelado" };
-  content.innerHTML = `${pageHead("Contratos", "Acompanhe vigÃªncia e receba alertas nos marcos de 90, 60, 30, 15 e 7 dias.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">${icon("plus")} Novo contrato</button>` : "")}
-    <section class="metric-grid">${metric("Ativos", activeContracts.length, "calendar")}${metric("Vencem em atÃ© 90 dias", due90.length, "history")}${metric("Vencem em atÃ© 30 dias", due30.length, "alert")}${metric("Encerrados", (contracts || []).filter((item) => item.status === "ended").length, "check")}</section>
-    <section class="card"><div class="people-list">${(contracts || []).length ? contracts.map((item) => {
-      const remaining = daysRemaining(item);
-      const detail = `${companyMap.get(item.company_id) || "Empresa nÃ£o informada"} Â· ${formatDate(item.start_date)} a ${formatDate(item.end_date)}${item.position_title ? ` Â· ${item.position_title}` : ""}`;
-      const status = item.status === "active" && remaining !== null && remaining >= 0 && remaining <= 90 ? `Vence em ${remaining} dia(s)` : contractLabels[item.status] || item.status;
-      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem nÃ£o identificado", detail, status, canManageContracts ? `<button class="btn btn-small btn-secondary" data-edit-contract="${item.id}">${icon("edit")} Alterar</button>` : "");
-    }).join("") : emptyState("Nenhum contrato cadastrado", canManageContracts ? "Registre o contrato para o Portal avisar sobre a vigÃªncia e concentrar os documentos." : "Nenhum contrato estÃ¡ disponÃ­vel para consulta.", canManageContracts ? `<button class="btn btn-primary" data-dialog="contract">Cadastrar contrato</button>` : "")}</div></section>`;
-}
-
-async function renderLeaves(content) {
-  const [{ data: records, error }, references] = await Promise.all([
-    supabase.from("leave_records").select("*").order("start_date", { ascending: false }), loadOperationalReferences(),
-  ]);
-  if (error) throw error;
-  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const canManage = hasPermission("personnel.manage");
-  const active = (records || []).filter((item) => item.status === "in_progress");
-  content.innerHTML = `${pageHead("FÃ©rias e afastamentos", "Controle perÃ­odo, empresa, situaÃ§Ã£o e retorno ao trabalho.", canManage ? `<button class="btn btn-primary" data-dialog="leave">${icon("plus")} Novo registro</button>` : "")}
-    <section class="metric-grid">${metric("Em andamento", active.length, "clock")}${metric("FÃ©rias planejadas", (records || []).filter((item) => item.leave_type === "vacation" && ["planned", "approved"].includes(item.status)).length, "calendar")}${metric("Afastamentos mÃ©dicos", (records || []).filter((item) => item.leave_type === "medical_leave" && !["completed", "cancelled"].includes(item.status)).length, "alert")}${metric("ConcluÃ­dos", (records || []).filter((item) => item.status === "completed").length, "check")}</section>
-    <section class="card"><div class="people-list">${(records || []).length ? records.map((item) => {
-      const details = `${leaveTypeLabels[item.leave_type] || item.leave_type} Â· ${formatDate(item.start_date)} a ${formatDate(item.end_date)}${item.company_id ? ` Â· ${companyMap.get(item.company_id) || "Empresa"}` : ""}${item.actual_return_date ? ` Â· retorno ${formatDate(item.actual_return_date)}` : ""}`;
-      return operationalRow(apprenticeMap.get(item.apprentice_id) || "Jovem nÃ£o identificado", details, leaveStatusLabels[item.status] || item.status, canManage ? `<button class="btn btn-small btn-secondary" data-edit-leave="${item.id}">${icon("edit")} Alterar</button>` : "");
-    }).join("") : emptyState("Nenhum perÃ­odo registrado", "Cadastre fÃ©rias ou afastamentos para centralizar datas e observaÃ§Ãµes.", canManage ? `<button class="btn btn-primary" data-dialog="leave">Novo registro</button>` : "")}</div></section>`;
-}
-
-async function renderTerminations(content) {
-  const [{ data: cases, error }, references, checklistResult] = await Promise.all([
-    supabase.from("termination_cases").select("*").order("created_at", { ascending: false }), loadOperationalReferences(),
-    supabase.from("termination_checklist_items").select("termination_id,is_required,is_completed"),
-  ]);
-  if (error || checklistResult.error) throw error || checklistResult.error;
-  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const canManage = hasPermission("personnel.manage");
-  const checklistMap = new Map();
-  for (const item of checklistResult.data || []) {
-    const current = checklistMap.get(item.termination_id) || { complete: 0, required: 0 };
-    if (item.is_required) current.required += 1;
-    if (item.is_required && item.is_completed) current.complete += 1;
-    checklistMap.set(item.termination_id, current);
-  }
-  const openCases = (cases || []).filter((item) => !["completed", "cancelled"].includes(item.status));
-  content.innerHTML = `${pageHead("Desligamentos", "Acompanhe exame, contabilidade, rescisÃ£o, entrega e arquivamento no mesmo processo.", canManage ? `<button class="btn btn-primary" data-dialog="termination">${icon("plus")} Abrir desligamento</button>` : "")}
-    <section class="metric-grid three">${metric("Em andamento", openCases.length, "tasks")}${metric("Aguardando contabilidade", (cases || []).filter((item) => item.status === "accounting").length, "mail")}${metric("ConcluÃ­dos", (cases || []).filter((item) => item.status === "completed").length, "check")}</section>
-    <section class="card"><div class="people-list workflow-list">${(cases || []).length ? cases.map((item) => {
-      const count = checklistMap.get(item.id) || { complete: 0, required: 0 };
-      const details = `${companyMap.get(item.company_id) || "Empresa nÃ£o informada"} Â· ${item.reason || "Motivo nÃ£o informado"}${item.effective_date ? ` Â· previsto para ${formatDate(item.effective_date)}` : ""} Â· checklist ${count.complete}/${count.required}`;
-      return `<article class="workflow-record"><div class="workflow-record-head"><div><h3>${escapeHtml(apprenticeMap.get(item.apprentice_id) || "Jovem nÃ£o identificado")}</h3><p>${escapeHtml(details)}</p></div><div class="person-actions"><span class="status status-draft">${escapeHtml(terminationStatusLabels[item.status] || item.status)}</span>${canManage ? `<button class="btn btn-small btn-secondary" data-edit-termination="${item.id}">${icon("edit")} Abrir</button>` : ""}</div></div>${workflowProgress(terminationStatusLabels, item.status)}</article>`;
-    }).join("") : emptyState("Nenhum desligamento aberto", "Abra o processo antes de iniciar as providÃªncias para manter tudo auditÃ¡vel.", canManage ? `<button class="btn btn-primary" data-dialog="termination">Abrir desligamento</button>` : "")}</div></section>`;
-}
-
-async function renderPersonnel(content) {
-  const [admissionsResult, contractsResult, leavesResult, terminationsResult, requirementsResult, accountingResult] = await Promise.all([
-    supabase.from("admission_cases").select("id,status,target_start_date"),
-    supabase.from("contracts").select("id,status,end_date"),
-    supabase.from("leave_records").select("id,status,leave_type,start_date,end_date"),
-    supabase.from("termination_cases").select("id,status,effective_date"),
-    supabase.from("document_requirements").select("id,status,due_date"),
-    supabase.from("accounting_dispatches").select("id,status,due_at"),
-  ]);
-  const failed = [admissionsResult, contractsResult, leavesResult, terminationsResult, requirementsResult, accountingResult].find((result) => result.error);
-  if (failed) throw failed.error;
-  const admissions = admissionsResult.data || [];
-  const contracts = contractsResult.data || [];
-  const leaves = leavesResult.data || [];
-  const terminations = terminationsResult.data || [];
-  const requirements = requirementsResult.data || [];
-  const accounting = accountingResult.data || [];
-  const openAdmissions = admissions.filter((item) => !["completed", "cancelled"].includes(item.status));
-  const activeContracts = contracts.filter((item) => ["scheduled", "active", "closing"].includes(item.status));
-  const activeLeaves = leaves.filter((item) => !["completed", "cancelled"].includes(item.status));
-  const openTerminations = terminations.filter((item) => !["completed", "cancelled"].includes(item.status));
-  const pendingDocuments = requirements.filter((item) => item.status === "pending");
-  const pendingAccounting = accounting.filter((item) => !["verified", "completed"].includes(item.status));
-  const dueContracts = activeContracts.filter((item) => item.end_date && new Date(`${item.end_date}T23:59:59`) >= new Date() && new Date(`${item.end_date}T23:59:59`).getTime() - Date.now() <= 90 * 86400000);
-  const attention = [
-    pendingDocuments.length ? ["Documentos pendentes", `${pendingDocuments.length} documento(s) aguardando recebimento ou conferÃªncia`, "documents"] : null,
-    pendingAccounting.length ? ["Retornos da contabilidade", `${pendingAccounting.length} envio(s) ainda nÃ£o concluÃ­do(s)`, "accounting"] : null,
-    dueContracts.length ? ["Contratos prÃ³ximos do fim", `${dueContracts.length} contrato(s) vencem em atÃ© 90 dias`, "contracts"] : null,
-    openTerminations.length ? ["Desligamentos em andamento", `${openTerminations.length} processo(s) ainda aberto(s)`, "terminations"] : null,
-  ].filter(Boolean);
-  const modules = [
-    ["AdmissÃµes", `${openAdmissions.length} em andamento`, "admissions", "tasks"],
-    ["Contratos", `${activeContracts.length} vÃ­nculos ativos ou programados`, "contracts", "calendar"],
-    ["FÃ©rias e afastamentos", `${activeLeaves.length} registros em aberto`, "leaves", "history"],
-    ["Desligamentos", `${openTerminations.length} processos em andamento`, "terminations", "alert"],
-    ["Contabilidade", `${pendingAccounting.length} envios pendentes`, "accounting", "mail"],
-    ["Documentos", `${pendingDocuments.length} pendÃªncias documentais`, "documents", "upload"],
-  ].filter(([, , view]) => canAccessView(view));
-  content.innerHTML = `${pageHead("Departamento Pessoal", "VisÃ£o Ãºnica do ciclo administrativo do jovem, da admissÃ£o ao encerramento do vÃ­nculo.")}
-    <section class="metric-grid">${metric("AdmissÃµes abertas", openAdmissions.length, "tasks")}${metric("Contratos vigentes", activeContracts.length, "calendar")}${metric("FÃ©rias e afastamentos", activeLeaves.length, "history")}${metric("Documentos pendentes", pendingDocuments.length, "upload")}</section>
-    <section class="administrative-hub-grid">${modules.map(([title, detail, view, iconName]) => `<button class="administrative-module-card" data-nav="${view}"><span>${icon(iconName)}</span><div><strong>${title}</strong><small>${detail}</small></div>${icon("chevron")}</button>`).join("")}</section>
-    <section class="card"><div class="card-head"><div><span class="eyebrow">Exige atenÃ§Ã£o</span><h2>PendÃªncias administrativas</h2></div><button class="text-link" data-nav="procedures">Ver procedimentos</button></div>${attention.length ? `<div class="people-list">${attention.map(([title, detail, view]) => operationalRow(title, detail, "Pendente", `<button class="btn btn-small btn-secondary" data-nav="${view}">Abrir</button>`)).join("")}</div>` : emptyState("Rotina administrativa em dia", "NÃ£o hÃ¡ pendÃªncias registradas neste momento.")}</section>`;
-}
-
-function financeDateKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function shiftFinanceMonth(monthValue, offset) {
-  const [year, month] = String(monthValue || "").split("-").map(Number);
-  return financeDateKey(new Date((Number.isFinite(year) ? year : new Date().getFullYear()), (Number.isFinite(month) ? month - 1 : new Date().getMonth()) + offset, 1)).slice(0, 7);
-}
-
-function financeCalendar(monthValue, charges, payables, canManage) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const first = new Date(year, month - 1, 1);
-  const start = new Date(year, month - 1, 1 - first.getDay());
-  const eventMap = new Map();
-  const addEvent = (date, item) => {
-    if (!date) return;
-    const list = eventMap.get(date) || [];
-    list.push(item);
-    eventMap.set(date, list);
-  };
-  charges.forEach((item) => addEvent(item.due_date, { type: "receive", id: item.id, label: item.description, value: item.amount, status: item.status }));
-  payables.forEach((item) => addEvent(item.due_date, { type: "pay", id: item.id, label: item.supplier_name, value: item.amount, status: item.status }));
-  const weekdays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "SÃ¡b"];
-  const days = Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
-  return `<section class="card finance-calendar"><div class="card-head"><div><span class="eyebrow">Agenda financeira</span><h2>${new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(first)}</h2></div><div class="calendar-controls"><button class="btn btn-small btn-quiet" data-finance-month-shift="-1" aria-label="MÃªs anterior">â€¹</button><button class="btn btn-small btn-quiet" data-finance-month-today>Hoje</button><button class="btn btn-small btn-quiet" data-finance-month-shift="1" aria-label="PrÃ³ximo mÃªs">â€º</button></div></div><p class="muted-note"><span class="calendar-key receive"></span> A receber <span class="calendar-key pay"></span> A pagar</p><div class="calendar-weekdays">${weekdays.map((day) => `<span>${day}</span>`).join("")}</div><div class="calendar-days">${days.map((date) => {
-    const key = financeDateKey(date);
-    const events = eventMap.get(key) || [];
-    const inMonth = date.getMonth() === first.getMonth();
-    const isToday = key === financeDateKey(new Date());
-    return `<div class="calendar-day ${inMonth ? "" : "outside"} ${isToday ? "today" : ""}"><b>${date.getDate()}</b><div>${events.slice(0, 3).map((event) => `<button class="calendar-event ${event.type}" ${canManage ? `data-edit-${event.type === "pay" ? "payable" : "financial-charge"}="${event.id}"` : "disabled"} title="${escapeHtml(event.label)} Â· ${formatMoney(event.value)}">${escapeHtml(event.label)}</button>`).join("")}${events.length > 3 ? `<small>+${events.length - 3} lanÃ§amento(s)</small>` : ""}</div></div>`;
-  }).join("")}</div></section>`;
-}
-
-async function renderFinance(content) {
-  const [chargesResult, payablesResult, references] = await Promise.all([
-    supabase.from("financial_charges").select("*").order("competence", { ascending: false }).order("due_date", { ascending: true, nullsFirst: false }),
-    supabase.from("accounts_payable").select("*").order("due_date", { ascending: true }),
-    loadOperationalReferences(),
-  ]);
-  if (chargesResult.error || payablesResult.error) throw chargesResult.error || payablesResult.error;
-  const charges = chargesResult.data || [];
-  const payables = payablesResult.data || [];
-  const canManage = hasPermission("finance.manage");
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const search = state.financeSearch.trim().toLocaleLowerCase("pt-BR");
-  const filteredCharges = charges.filter((item) => {
-    const companyName = companyMap.get(item.company_id) || "";
-    const haystack = [item.description, item.invoice_number, item.payment_slip_number, companyName].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
-    return (!search || haystack.includes(search)) && (!state.financeStatus || item.status === state.financeStatus) && (!state.financeCompany || item.company_id === state.financeCompany);
-  });
-  const filteredPayables = payables.filter((item) => {
-    const haystack = [item.supplier_name, item.supplier_document, item.category, item.description, item.external_reference, item.barcode].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
-    return (!search || haystack.includes(search)) && (!state.payableStatus || item.status === state.payableStatus);
-  });
-  const openCharges = charges.filter((item) => !["paid", "cancelled"].includes(item.status));
-  const overdueCharges = charges.filter((item) => item.status === "overdue" || (!["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date()));
-  const received = charges.filter((item) => item.status === "paid");
-  const openPayables = payables.filter((item) => !["paid", "cancelled"].includes(item.status));
-  const overduePayables = openPayables.filter((item) => item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date());
-  const paidPayables = payables.filter((item) => item.status === "paid");
-  const hasChargeFilters = Boolean(state.financeSearch || state.financeStatus || state.financeCompany);
-  const tabs = [["receivable", "Contas a receber", charges.length], ["payable", "Contas a pagar", payables.length], ["calendar", "CalendÃ¡rio", ""]];
-  if (!tabs.some(([key]) => key === state.financeTab)) state.financeTab = "receivable";
-  const action = !canManage ? "" : state.financeTab === "payable" ? `<button class="btn btn-primary" data-dialog="payable">${icon("plus")} Nova conta a pagar</button>` : `<button class="btn btn-primary" data-dialog="financial-charge">${icon("plus")} Nova cobranÃ§a</button>`;
-  let body = "";
-  if (state.financeTab === "receivable") {
-    body = `<section class="metric-grid">${metric("A receber", formatMoney(openCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overdueCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Recebido", formatMoney(received.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("CobranÃ§as", charges.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar empresa, cobranÃ§a, NF ou boleto" aria-label="Buscar cobranÃ§as" /></label><select data-finance-filter="status" aria-label="Filtrar por situaÃ§Ã£o"><option value="">Todas as situaÃ§Ãµes</option>${selectOptions(financialStatusLabels, state.financeStatus)}</select><select data-finance-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.financeCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${hasChargeFilters ? `<button class="btn btn-small btn-quiet" data-clear-finance-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredCharges.length ? filteredCharges.map((item) => { const isLate = !["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${formatMonth(item.competence)} Â· vence ${item.due_date ? formatDate(item.due_date) : "sem data"}${item.invoice_number ? ` Â· NF ${item.invoice_number}` : ""}${item.payment_slip_number ? ` Â· boleto ${item.payment_slip_number}` : ""}`; const status = isLate ? "Vencido â€” atualizar" : financialStatusLabels[item.status] || item.status; return `<article class="person-row finance-row"><span class="avatar">${icon(isLate ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} Â· ${escapeHtml(detail)}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-financial-charge="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma cobranÃ§a encontrada", hasChargeFilters ? "Altere os filtros para localizar outro registro." : "Cadastre a primeira cobranÃ§a para iniciar o controle financeiro.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">Nova cobranÃ§a</button>` : "")}</div></section>`;
-  } else if (state.financeTab === "payable") {
-    body = `<section class="metric-grid">${metric("A pagar", formatMoney(openPayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overduePayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Pago", formatMoney(paidPayables.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Contas", payables.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar fornecedor, despesa ou referÃªncia" aria-label="Buscar contas a pagar" /></label><select data-payable-filter aria-label="Filtrar por situaÃ§Ã£o"><option value="">Todas as situaÃ§Ãµes</option>${selectOptions(payableStatusLabels, state.payableStatus)}</select>${state.financeSearch || state.payableStatus ? `<button class="btn btn-small btn-quiet" data-clear-payable-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredPayables.length ? filteredPayables.map((item) => { const late = !["paid", "cancelled"].includes(item.status) && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${escapeHtml(item.category)} Â· vence ${formatDate(item.due_date)}${item.planned_payment_date ? ` Â· previsto para ${formatDate(item.planned_payment_date)}` : ""}${item.payment_method === "bradesco" ? " Â· Bradesco (manual)" : ""}`; return `<article class="person-row finance-row"><span class="avatar">${icon(late ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(item.supplier_name)}</strong><small>${escapeHtml(item.description)} Â· ${detail}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(late ? "Vencida â€” atualizar" : payableStatusLabels[item.status] || item.status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-payable="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma conta a pagar encontrada", "Cadastre fornecedores, despesas, vencimentos e responsÃ¡veis para manter os avisos centralizados.", canManage ? `<button class="btn btn-primary" data-dialog="payable">Nova conta a pagar</button>` : "")}</div></section>`;
-  } else {
-    body = financeCalendar(state.financeMonth, charges, payables, canManage);
-  }
-  content.innerHTML = `${pageHead("Financeiro", "Controle manual de cobranÃ§as, contas a pagar, calendÃ¡rio e lembretes de vencimento em uma Ãºnica rotina.", action)}<nav class="operations-tabs" aria-label="Ãreas do financeiro">${tabs.map(([key, label, count]) => `<button class="${state.financeTab === key ? "active" : ""}" data-finance-tab="${key}">${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>${body}`;
-}
-
-async function renderDocuments(content) {
-  const [documentsResult, requirementsResult, references] = await Promise.all([
-    supabase.from("document_records").select("*").order("created_at", { ascending: false }).limit(500),
-    supabase.from("document_requirements").select("*").order("due_date", { ascending: true, nullsFirst: false }).limit(500),
-    loadOperationalReferences(),
-  ]);
-  if (documentsResult.error || requirementsResult.error) throw documentsResult.error || requirementsResult.error;
-  const documents = documentsResult.data || [];
-  const requirements = requirementsResult.data || [];
-  const canManage = hasPermission("documents.manage");
-  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const documentMap = new Map(documents.map((item) => [item.id, item]));
-  const search = state.documentSearch.trim().toLocaleLowerCase("pt-BR");
-  const matches = (item, linkedDocument = null) => {
-    const haystack = [item.title, item.notes, apprenticeMap.get(item.apprentice_id), companyMap.get(item.company_id), linkedDocument?.title].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
-    return (!search || haystack.includes(search)) && (!state.documentCategory || item.category === state.documentCategory);
-  };
-  const visibleDocuments = documents.filter((item) => state.documentTab === "archived" ? item.is_archived && matches(item) : !item.is_archived && matches(item));
-  const visibleRequirements = requirements.filter((item) => matches(item, documentMap.get(item.document_id)));
-  const pending = requirements.filter((item) => item.status === "pending");
-  const overdue = pending.filter((item) => item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date());
-  const expiring = documents.filter((item) => !item.is_archived && item.expires_on && new Date(`${item.expires_on}T23:59:59`) >= new Date() && new Date(`${item.expires_on}T23:59:59`).getTime() - Date.now() <= 30 * 86400000);
-  const tabs = [["files", "Arquivos", documents.filter((item) => !item.is_archived).length], ["requirements", "PendÃªncias", pending.length], ["archived", "Arquivados", documents.filter((item) => item.is_archived).length]];
-  const rows = state.documentTab === "requirements"
-    ? visibleRequirements.map((item) => {
-      const subject = apprenticeMap.get(item.apprentice_id) || companyMap.get(item.company_id) || "Processo administrativo";
-      const linked = documentMap.get(item.document_id);
-      const detail = `${subject} Â· ${documentCategoryLabels[item.category] || item.category}${item.due_date ? ` Â· prazo ${formatDate(item.due_date)}` : ""}${linked ? ` Â· arquivo ${linked.title}` : ""}`;
-      return operationalRow(item.title, detail, documentRequirementStatusLabels[item.status] || item.status, canManage ? `<button class="btn btn-small btn-secondary" data-edit-document-requirement="${item.id}">${icon("edit")} Alterar</button>` : "");
-    }).join("")
-    : visibleDocuments.map((item) => {
-      const subject = apprenticeMap.get(item.apprentice_id) || companyMap.get(item.company_id) || "Registro vinculado";
-      const detail = `${subject} Â· ${documentCategoryLabels[item.category] || item.category} Â· ${formatFileSize(item.file_size)}${item.expires_on ? ` Â· validade ${formatDate(item.expires_on)}` : ""}`;
-      const actions = item.is_archived ? (canManage ? `<button class="btn btn-small btn-secondary" data-archive-document="${item.id}" data-document-archived="true">Restaurar</button>` : "") : `<button class="btn btn-small btn-secondary" data-download-document="${item.id}">${icon("download")} Baixar</button>${canManage ? `<button class="btn btn-small btn-quiet" data-edit-document="${item.id}">${icon("edit")} Alterar</button><button class="btn btn-small btn-quiet" data-archive-document="${item.id}" data-document-archived="false">Arquivar</button>` : ""}`;
-      return operationalRow(item.title, detail, item.is_archived ? "Arquivado" : item.is_generated ? "Gerado pelo portal" : "Enviado", actions);
-    }).join("");
-  const hasFilters = Boolean(state.documentSearch || state.documentCategory);
-  const actions = canManage ? `<div class="page-actions"><button class="btn btn-secondary" data-dialog="document-requirement">${icon("tasks")} Nova pendÃªncia</button><button class="btn btn-primary" data-dialog="document">${icon("upload")} Enviar documento</button></div>` : "";
-  content.innerHTML = `${pageHead("Documentos", "Arquivo privado por jovem, empresa e processo, com controle do que ainda falta receber.", actions)}
-    <section class="metric-grid">${metric("Arquivos ativos", documents.filter((item) => !item.is_archived).length, "upload")}${metric("Pendentes", pending.length, "tasks")}${metric("Pendentes vencidos", overdue.length, "alert")}${metric("Validade em atÃ© 30 dias", expiring.length, "calendar")}</section>
-    <nav class="operations-tabs" aria-label="Ãreas de documentos">${tabs.map(([value, label, count]) => `<button class="${state.documentTab === value ? "active" : ""}" data-document-tab="${value}">${label}<span>${count}</span></button>`).join("")}</nav>
-    <section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-document-search value="${escapeHtml(state.documentSearch)}" placeholder="Buscar documento, jovem ou empresa" aria-label="Buscar documentos" /></label><select data-document-category aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${selectOptions(documentCategoryLabels, state.documentCategory)}</select>${hasFilters ? `<button class="btn btn-small btn-quiet" data-clear-document-filters>Limpar filtros</button>` : ""}</section>
-    <section class="card"><div class="people-list">${rows || emptyState(state.documentTab === "requirements" ? "Nenhuma pendÃªncia encontrada" : state.documentTab === "archived" ? "Nenhum documento arquivado" : "Nenhum documento encontrado", hasFilters ? "Altere os filtros para localizar outro registro." : state.documentTab === "requirements" ? "Registre o que precisa ser recebido e conferido." : "Envie arquivos para formar o histÃ³rico digital.")}</div></section>`;
-}
-
-async function renderAccounting(content) {
-  const [{ data: records, error }, references] = await Promise.all([
-    supabase.from("accounting_dispatches").select("*").order("due_at", { ascending: true, nullsFirst: false }), loadOperationalReferences(),
-  ]);
-  if (error) throw error;
-  const apprenticeMap = new Map(references.profiles.map((item) => [item.id, item.full_name]));
-  const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
-  const responsibleMap = new Map(references.administrators.map((item) => [item.id, item.full_name]));
-  const canManage = hasPermission("finance.manage");
-  const open = (records || []).filter((item) => !["verified", "completed"].includes(item.status));
-  content.innerHTML = `${pageHead("Contabilidade", "Registre o envio, o retorno e a conferÃªncia de cada solicitaÃ§Ã£o contÃ¡bil.", canManage ? `<button class="btn btn-primary" data-dialog="accounting">${icon("plus")} Novo envio</button>` : "")}
-    <section class="metric-grid">${metric("Em preparaÃ§Ã£o", (records || []).filter((item) => ["pending", "preparing"].includes(item.status)).length, "tasks")}${metric("Aguardando retorno", (records || []).filter((item) => ["sent", "waiting_response"].includes(item.status)).length, "clock")}${metric("Recebidos", (records || []).filter((item) => item.status === "received").length, "mail")}${metric("Conferidos", (records || []).filter((item) => ["verified", "completed"].includes(item.status)).length, "check")}</section>
-    <section class="card"><div class="people-list">${(records || []).length ? records.map((item) => {
-      const relations = [apprenticeMap.get(item.apprentice_id), companyMap.get(item.company_id), item.competence ? formatMonth(item.competence) : null, responsibleMap.get(item.responsible_id) ? `responsÃ¡vel ${responsibleMap.get(item.responsible_id)}` : null, item.due_at ? `prazo ${formatDate(item.due_at, true)}` : null].filter(Boolean).join(" Â· ") || "Sem vÃ­nculo informado";
-      return operationalRow(item.title, relations, accountingStatusLabels[item.status] || item.status, canManage ? `<button class="btn btn-small btn-secondary" data-edit-accounting="${item.id}">${icon("edit")} Alterar</button>` : "");
-    }).join("") : emptyState("Nenhum envio registrado", "Crie um registro para admissÃµes, fÃ©rias, folha, alteraÃ§Ãµes cadastrais ou desligamentos.", canManage ? `<button class="btn btn-primary" data-dialog="accounting">Novo envio</button>` : "")}</div></section>`;
-}
-
-async function renderProcedures(content) {
-  const [pipelinesResult, itemsResult, tasksResult, references] = await Promise.all([
-    supabase.from("pipelines").select("id,slug,name,color").eq("is_active", true).order("position"),
-    supabase.from("pipeline_items").select("id,title,pipeline_id,responsible_id,due_at,closed_at,is_archived").eq("is_archived", false),
-    supabase.from("tasks").select("id,title,status,assigned_to,due_at,pipeline_item_id").not("status", "in", "(completed,cancelled)"),
-    loadOperationalReferences(),
-  ]);
-  if (pipelinesResult.error || itemsResult.error || tasksResult.error) throw pipelinesResult.error || itemsResult.error || tasksResult.error;
-  const administrativeSlugs = new Set(["admissions", "contracts", "terminations", "finance", "personnel"]);
-  const pipelines = (pipelinesResult.data || []).filter((item) => administrativeSlugs.has(item.slug));
-  const pipelineIds = new Set(pipelines.map((item) => item.id));
-  const items = (itemsResult.data || []).filter((item) => pipelineIds.has(item.pipeline_id));
-  const itemIds = new Set(items.map((item) => item.id));
-  const tasks = (tasksResult.data || []).filter((item) => !item.pipeline_item_id || itemIds.has(item.pipeline_item_id));
-  const responsibleMap = new Map(references.administrators.map((item) => [item.id, item.full_name]));
-  const overdueItems = items.filter((item) => !item.closed_at && isOverdue(item.due_at));
-  const overdueTasks = tasks.filter((item) => isOverdue(item.due_at));
-  const unassigned = items.filter((item) => !item.closed_at && !item.responsible_id);
-  const urgentRows = [
-    ...overdueItems.map((item) => ({ title: item.title, detail: `${responsibleMap.get(item.responsible_id) || "Sem responsÃ¡vel"} Â· prazo ${formatDate(item.due_at, true)}`, type: "Processo atrasado" })),
-    ...overdueTasks.map((item) => ({ title: item.title, detail: `${responsibleMap.get(item.assigned_to) || "Sem responsÃ¡vel"} Â· prazo ${formatDate(item.due_at, true)}`, type: "Tarefa atrasada" })),
-  ].slice(0, 12);
-  content.innerHTML = `${pageHead("Procedimentos", "Acesse as rotinas administrativas por esteira e confira responsÃ¡veis, tarefas e prazos.", `<div class="page-actions"><button class="btn btn-secondary" data-nav="tasks">${icon("tasks")} Ver tarefas</button><button class="btn btn-primary" data-nav="pipelines">${icon("kanban")} Abrir esteiras</button></div>`)}
-    <section class="metric-grid">${metric("Processos abertos", items.filter((item) => !item.closed_at).length, "kanban")}${metric("Processos atrasados", overdueItems.length, "alert")}${metric("Tarefas abertas", tasks.length, "tasks")}${metric("Sem responsÃ¡vel", unassigned.length, "users")}</section>
-    <section class="administrative-hub-grid">${pipelines.map((pipeline) => { const openCount = items.filter((item) => item.pipeline_id === pipeline.id && !item.closed_at).length; return `<button class="administrative-module-card" data-open-procedure-pipeline="${pipeline.id}"><span style="color:${pipeline.color}">${icon("kanban")}</span><div><strong>${escapeHtml(pipeline.name)}</strong><small>${openCount} processo(s) aberto(s)</small></div>${icon("chevron")}</button>`; }).join("")}</section>
-    <section class="card"><div class="card-head"><div><span class="eyebrow">Prioridade</span><h2>Prazos vencidos</h2></div></div>${urgentRows.length ? `<div class="people-list">${urgentRows.map((item) => operationalRow(item.title, item.detail, item.type, "")).join("")}</div>` : emptyState("Nenhum prazo vencido", "Os processos e tarefas administrativos estÃ£o dentro do prazo registrado.")}</section>`;
-}
-
-async function renderPeople(content) {
-  const [result, { data: companies, error: companiesError }] = await Promise.all([
-    callAdmin({ action: "list_users" }, true),
-    supabase.from("companies").select("id,name").order("name"),
-  ]);
-  if (companiesError) throw companiesError;
-  const people = result.users || [];
-  state.people = people;
-  const companyMap = new Map((companies || []).map((item) => [item.id, item.name]));
-  const pendingCount = people.filter((person) => person.accessExists && person.isActive && !person.emailConfirmedAt).length;
-  const activeCount = people.filter((person) => person.emailConfirmedAt && person.isActive).length;
-  const archivedCount = people.filter((person) => !person.isActive).length;
-
-  content.innerHTML = `
-    ${pageHead("Pessoas e convites", "Gerencie perfis, credenciais, histÃ³rico de aprendizagem e acessos criados pela CAFCM.",
-      `<div class="page-actions">
-        <button class="btn btn-quiet" data-download-people-template>${icon("download")} Modelo CSV</button>
-        ${profileDepartment() === "management" ? `<button class="btn btn-secondary" data-export-people>${icon("download")} Salvar backup</button>` : ""}
-        <button class="btn btn-secondary" data-dialog="people-import">${icon("upload")} Importar</button>
-        <button class="btn btn-primary" data-dialog="invite">${icon("mail")} Enviar convite</button>
-      </div>`)}
-    <section class="people-summary">
-      <span><strong>${people.length}</strong> pessoas</span>
-      <span><strong>${activeCount}</strong> acessos confirmados</span>
-      <span><strong>${pendingCount}</strong> ${pendingCount === 1 ? "convite pendente" : "convites pendentes"}</span>
-      <span><strong>${archivedCount}</strong> ${archivedCount === 1 ? "acesso arquivado" : "acessos arquivados"}</span>
-    </section>
-    ${pendingCount ? `<div class="notice">HÃ¡ ${pendingCount} ${pendingCount === 1 ? "pessoa que ainda nÃ£o confirmou" : "pessoas que ainda nÃ£o confirmaram"} o e-mail. Use â€œReenviar conviteâ€ na pessoa correspondente.</div>` : ""}
-    <section class="card">
-      ${people.length ? `<div class="people-list">
-        ${people.map((person) => {
-          const pending = person.accessExists && person.isActive && !person.emailConfirmedAt;
-          const inactive = !person.isActive;
-          const statusLabel = !person.accessExists ? "Acesso removido" : inactive ? "Arquivado" : pending ? "Convite pendente" : "Ativo";
-          const statusClass = inactive ? "status-archived" : pending ? "status-draft" : "status-published";
-          const organization = person.role === "cafcm_admin"
-            ? departmentLabels[person.department || "management"] || "Equipe CAFCM"
-            : person.companyId
-              ? companyMap.get(person.companyId) || "Empresa vinculada"
-              : "Sem empresa vinculada";
-          const canManage = canManagePerson(person);
-          return `
-          <article class="person-row">
-            <span class="avatar">${escapeHtml(initials(person.fullName))}</span>
-            <div class="person-main"><strong>${escapeHtml(person.fullName || "Nome nÃ£o informado")}</strong><small>${escapeHtml(person.email || "E-mail nÃ£o disponÃ­vel")}</small><small>${escapeHtml(organization)}</small></div>
-            <div class="person-access"><span class="role-pill">${roleLabels[person.role] || "Pendente"}</span><span class="status ${statusClass}">${statusLabel}</span></div>
-            <div class="person-dates"><small>Criado em ${formatDate(person.createdAt, true)}</small><small>${person.lastSignInAt ? `Ãšltimo acesso em ${formatDate(person.lastSignInAt, true)}` : "Ainda nÃ£o acessou"}</small></div>
-            <div class="person-actions">
-              <button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} HistÃ³rico</button>
-              ${canManage && person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Perfil e senha</button>` : ""}
-              ${canManage && person.accessExists && person.isActive ? `<button class="btn btn-small btn-quiet" data-resend-access="${person.id}" data-access-pending="${pending}">${pending ? "Reenviar convite" : "Enviar recuperaÃ§Ã£o"}</button>` : ""}
-              ${canManage && person.id !== state.profile.id && person.accessExists ? `<button class="btn btn-small ${inactive ? "btn-secondary" : "btn-danger-soft"}" data-set-person-active="${person.id}" data-person-active="${inactive ? "true" : "false"}" data-person-name="${escapeHtml(person.fullName)}">${inactive ? "Restaurar acesso" : "Excluir acesso"}</button>` : ""}
-            </div>
-          </article>
-        `;}).join("")}
-      </div>` : emptyState("Nenhum convite enviado", "Depois de cadastrar as empresas, convide jovens e representantes para acessar o portal.", `<button class="btn btn-primary" data-dialog="invite">Enviar primeiro convite</button>`)}
-    </section>
-  `;
-}
-
-async function renderAudit(content) {
-  let auditQuery = supabase
-    .from("audit_logs")
-    .select("id,actor_id,subject_user_id,action,entity_type,entity_id,details,occurred_at")
-    .order("occurred_at", { ascending: false })
-    .limit(250);
-  if (state.auditPersonId) auditQuery = auditQuery.or(`actor_id.eq.${state.auditPersonId},subject_user_id.eq.${state.auditPersonId}`);
-
-  const [{ data: logs, error }, { data: profiles, error: profilesError }] = await Promise.all([
-    auditQuery,
-    supabase.from("profiles").select("id,full_name").order("full_name"),
-  ]);
-  if (error || profilesError) throw error || profilesError;
-
-  const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.full_name]));
-  const selectedName = state.auditPersonId ? profileMap.get(state.auditPersonId) || "Pessoa selecionada" : null;
-  const today = new Date().toISOString().slice(0, 10);
-  const todayCount = (logs || []).filter((log) => String(log.occurred_at || "").slice(0, 10) === today).length;
-  const userActions = (logs || []).filter((log) => log.actor_id).length;
-
-  content.innerHTML = `
-    ${pageHead("Auditoria do portal", selectedName ? `Mostrando as aÃ§Ãµes relacionadas a ${escapeHtml(selectedName)}.` : "Registro cronolÃ³gico das aÃ§Ãµes relevantes de usuÃ¡rios e da equipe CAFCM.",
-      selectedName ? `<button class="btn btn-secondary" data-clear-audit-filter>Ver todas as aÃ§Ãµes</button>` : "")}
-    <section class="metric-grid three audit-metrics">
-      ${metric("Registros exibidos", (logs || []).length, "history")}
-      ${metric("AÃ§Ãµes de usuÃ¡rios", userActions, "users")}
-      ${metric("Registradas hoje", todayCount, "clock")}
-    </section>
-    <section class="card audit-card">
-      <div class="card-head"><div><span class="eyebrow">Trilha de auditoria</span><h2>Atividade mais recente</h2></div></div>
-      ${(logs || []).length ? `<div class="audit-list">${logs.map((log) => {
-        const actor = log.actor_id ? profileMap.get(log.actor_id) || "UsuÃ¡rio arquivado" : "Sistema";
-        const subject = log.subject_user_id && log.subject_user_id !== log.actor_id ? profileMap.get(log.subject_user_id) : null;
-        const detail = log.details?.label || subject || "";
-        return `<article class="audit-row">
-          <span class="audit-dot">${icon(log.action.includes("lesson") || log.action.includes("course") ? "book" : log.action.includes("user") || log.action.includes("profile") ? "users" : "history")}</span>
-          <div><strong>${escapeHtml(auditActionLabels[log.action] || log.action)}</strong><p>${escapeHtml(actor)}${subject ? ` Â· relacionado a ${escapeHtml(subject)}` : ""}${detail && detail !== subject ? ` Â· ${escapeHtml(detail)}` : ""}</p></div>
-          <time datetime="${escapeHtml(log.occurred_at)}">${formatDate(log.occurred_at, true)}</time>
-        </article>`;
-      }).join("")}</div>` : emptyState("Nenhuma aÃ§Ã£o registrada", "Os novos acessos, alteraÃ§Ãµes, conclusÃµes e envios aparecerÃ£o aqui.")}
-    </section>
-  `;
-}
-
-async function renderCourses(content) {
-  const [{ data, error }, { data: enrollments }] = await Promise.all([
-    supabase.from("courses").select("*").order("updated_at", { ascending: false }),
-    supabase.from("enrollments").select("course_id"),
-  ]);
-  if (error) throw error;
-  const enrollmentCount = new Map();
-  for (const enrollment of enrollments || []) {
-    enrollmentCount.set(enrollment.course_id, (enrollmentCount.get(enrollment.course_id) || 0) + 1);
-  }
-  content.innerHTML = `
-    ${pageHead("Cursos", "Organize objetivos, carga horÃ¡ria, aulas e atividades antes de liberar a formaÃ§Ã£o.",
-      `<button class="btn btn-primary" data-dialog="course">${icon("plus")} Novo curso</button>`)}
-    <section class="course-grid">
-      ${data.length ? data.map((course) => `
-        <article class="course-card">
-          <div class="course-card-top"><span class="course-symbol">${icon("book")}</span>${statusBadge(course.status)}</div>
-          <span class="course-category">${escapeHtml(course.category || "Sem categoria")}</span>
-          <h2>${escapeHtml(course.title)}</h2>
-          <p>${escapeHtml(course.description || "Sem descriÃ§Ã£o cadastrada.")}</p>
-          <div class="course-counts">
-            <span><strong>${course.lessons_count}</strong> aulas</span>
-            <span><strong>${course.activities_count}</strong> atividades</span>
-            <span><strong>${enrollmentCount.get(course.id) || 0}</strong> matrÃ­culas</span>
-          </div>
-          <small class="course-workload">${formatWorkload(course.workload_hours)}</small>
-          <button class="btn btn-secondary btn-block" data-open-course="${course.id}">Gerenciar curso ${icon("arrow")}</button>
-        </article>
-      `).join("") : emptyState("Nenhum curso criado", "Crie o primeiro curso. Ele permanecerÃ¡ como rascunho atÃ© a publicaÃ§Ã£o.", `<button class="btn btn-primary" data-dialog="course">Criar primeiro curso</button>`)}
-    </section>
-  `;
-}
-
-async function renderCourseEditor(content) {
-  if (!state.selectedCourseId) return navigate("courses");
-  const [{ data: course, error }, { data: lessons }, { data: activities }, { count: enrollmentCount }] = await Promise.all([
-    supabase.from("courses").select("*").eq("id", state.selectedCourseId).single(),
-    supabase.from("lessons").select("*,lesson_blocks(id,block_type,title,position)").eq("course_id", state.selectedCourseId).order("position"),
-    supabase.from("activities").select("*").eq("course_id", state.selectedCourseId).order("position"),
-    supabase.from("enrollments").select("*", { count: "exact", head: true }).eq("course_id", state.selectedCourseId),
-  ]);
-  if (error || !course) throw error || new Error("Curso nÃ£o encontrado.");
-  const lessonMap = new Map((lessons || []).map((lesson) => [lesson.id, lesson.title]));
-  const detailsReady = Boolean(course.description?.trim() && course.objectives?.trim() && Number(course.workload_hours) > 0);
-  const structuredLessons = Boolean(lessons?.length) && lessons.every((lesson) => lesson.lesson_blocks?.length);
-
-  content.innerHTML = `
-    <button class="back-button" data-nav="courses">â† Voltar aos cursos</button>
-    <header class="editor-head">
-      <div>
-        <div class="editor-meta">${statusBadge(course.status)}<span>${escapeHtml(course.category || "Sem categoria")}</span><span>${formatWorkload(course.workload_hours)}</span><span>${enrollmentCount || 0} matrÃ­culas</span></div>
-        <h1>${escapeHtml(course.title)}</h1>
-        <p>${escapeHtml(course.description || "Sem descriÃ§Ã£o cadastrada.")}</p>
-      </div>
-      <div class="editor-actions">
-        <button class="btn btn-secondary" data-edit-course="${course.id}">${icon("edit")} Alterar dados</button>
-        ${course.status !== "archived" ? `<button class="btn ${course.status === "published" ? "btn-secondary" : "btn-primary"}" data-toggle-course-status="${course.id}" data-current-status="${course.status}">${course.status === "published" ? "Voltar para rascunho" : "Publicar curso"}</button>` : ""}
-        <button class="btn btn-quiet" data-archive-course="${course.id}" data-course-status="${course.status}">${icon("archive")} ${course.status === "archived" ? "Reabrir" : "Arquivar"}</button>
-        <button class="icon-btn danger-button" data-delete-course="${course.id}" data-course-title="${escapeHtml(course.title)}" aria-label="Excluir curso">${icon("trash")}</button>
-      </div>
-    </header>
-    <section class="course-admin-summary">
-      <article class="card readiness-card">
-        <div class="card-head"><div><span class="eyebrow">PreparaÃ§Ã£o</span><h2>Pronto para publicar?</h2></div></div>
-        ${readinessItem("Dados pedagÃ³gicos preenchidos", detailsReady, "Inclua descriÃ§Ã£o, objetivos e carga horÃ¡ria.")}
-        ${readinessItem("Ao menos uma aula", Boolean(lessons?.length), "ObrigatÃ³rio para publicar.")}
-        ${readinessItem("Todas as aulas estruturadas", structuredLessons, "Cada aula precisa de ao menos uma linha de aprendizagem.")}
-        ${readinessItem("Atividade prÃ¡tica", Boolean(activities?.length), "Recomendado para acompanhar a aprendizagem.")}
-      </article>
-      <article class="card objectives-card">
-        <span class="eyebrow">Objetivos de aprendizagem</span>
-        <p>${escapeHtml(course.objectives || "Ainda nÃ£o informados. Use â€œAlterar dadosâ€ para registrar o que o jovem deverÃ¡ aprender.")}</p>
-      </article>
-    </section>
-    <div class="editor-grid">
-      <section class="card">
-        <div class="card-head"><div><span class="eyebrow">ConteÃºdo</span><h2>Aulas</h2></div><button class="btn btn-small btn-secondary" data-dialog="lesson">${icon("plus")} Adicionar</button></div>
-        ${lessons?.length ? `<ol class="editor-list lesson-admin-list">${lessons.map((lesson) => {
-          const blocks = [...(lesson.lesson_blocks || [])].sort((a, b) => a.position - b.position);
-          return `<li><span>${lesson.position}</span><div><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.summary || "Resumo ainda nÃ£o informado.")}</p><div class="lesson-structure-summary"><b>${blocks.length} ${blocks.length === 1 ? "linha" : "linhas"}</b>${lesson.estimated_minutes ? `<small>${lesson.estimated_minutes} min</small>` : ""}${blocks.slice(0, 4).map((block) => `<small>${escapeHtml(blockTypeLabels[block.block_type] || block.block_type)}</small>`).join("")}</div><div class="item-actions"><button class="text-link" data-open-lesson-editor="${lesson.id}">Estruturar aula</button><button class="text-link" data-edit-lesson="${lesson.id}">Alterar dados</button><button class="text-link danger-button" data-delete-lesson="${lesson.id}" data-item-title="${escapeHtml(lesson.title)}">Excluir</button></div></div></li>`;
-        }).join("")}</ol>` : emptyState("Nenhuma aula", "Adicione ao menos uma aula antes de publicar.")}
-      </section>
-      <section class="card">
-        <div class="card-head"><div><span class="eyebrow">PrÃ¡tica</span><h2>Atividades</h2></div><button class="btn btn-small btn-secondary" data-dialog="activity">${icon("plus")} Adicionar</button></div>
-        ${activities?.length ? `<div class="editor-list activities-editor">${activities.map((activity) => `<article><span>${activity.position}</span><div><strong>${escapeHtml(activity.title)}</strong><p>${escapeHtml(activity.instructions || "Sem instruÃ§Ãµes.")}</p><small>${activity.lesson_id ? `Aula: ${escapeHtml(lessonMap.get(activity.lesson_id) || "Relacionada")}` : "Sem aula especÃ­fica"} Â· ${formatDate(activity.due_at, true)}</small><div class="item-actions"><button class="text-link" data-edit-activity="${activity.id}">Alterar</button><button class="text-link danger-button" data-delete-activity="${activity.id}" data-item-title="${escapeHtml(activity.title)}">Excluir</button></div></div></article>`).join("")}</div>` : emptyState("Nenhuma atividade", "As atividades sÃ£o opcionais e podem ser acrescentadas depois.")}
-      </section>
-    </div>
-  `;
-}
-
-async function renderLessonEditor(content) {
-  if (!state.selectedCourseId || !state.selectedLessonId) return navigate("courses");
-  const [{ data: course, error: courseError }, { data: lesson, error: lessonError }, { data: blocks }, { data: activities }] = await Promise.all([
-    supabase.from("courses").select("id,title,status").eq("id", state.selectedCourseId).single(),
-    supabase.from("lessons").select("*").eq("id", state.selectedLessonId).eq("course_id", state.selectedCourseId).single(),
-    supabase.from("lesson_blocks").select("*").eq("lesson_id", state.selectedLessonId).order("position"),
-    supabase.from("activities").select("*").eq("lesson_id", state.selectedLessonId).order("position"),
-  ]);
-  if (courseError || lessonError || !course || !lesson) throw courseError || lessonError || new Error("Aula nÃ£o encontrada.");
-
-  content.innerHTML = `
-    <button class="back-button" data-return-course-editor>â† Voltar ao curso</button>
-    <header class="editor-head lesson-editor-head">
-      <div><div class="editor-meta"><span>Aula ${lesson.position}</span>${lesson.estimated_minutes ? `<span>${lesson.estimated_minutes} minutos</span>` : ""}${statusBadge(course.status)}</div><h1>${escapeHtml(lesson.title)}</h1><p>${escapeHtml(lesson.summary || "Organize abaixo o caminho que o jovem percorrerÃ¡ nesta aula.")}</p></div>
-      <div class="editor-actions"><button class="btn btn-secondary" data-edit-lesson="${lesson.id}">${icon("edit")} Alterar dados</button><button class="btn btn-primary" data-dialog="block">${icon("plus")} Nova linha</button></div>
-    </header>
-    <section class="learning-builder-intro">
-      <div><strong>Como esta aula funciona</strong><p>Cada linha abaixo vira uma etapa em tela cheia para o jovem. Ele avanÃ§a como em uma apresentaÃ§Ã£o e conclui a aula no final.</p></div>
-      <div class="builder-flow"><span>Texto</span><i>â†’</i><span>Slides</span><i>â†’</i><span>VÃ­deo</span><i>â†’</i><span>ConsideraÃ§Ãµes</span><i>â†’</i><span>Atividade</span></div>
-    </section>
-    <section class="card learning-builder">
-      <div class="card-head"><div><span class="eyebrow">SequÃªncia pedagÃ³gica</span><h2>Linhas de aprendizagem</h2></div><button class="btn btn-small btn-secondary" data-dialog="block">${icon("plus")} Adicionar etapa</button></div>
-      ${(blocks || []).length ? `<div class="block-admin-list">${blocks.map((block, index) => {
-        const slides = block.block_type === "slides" ? parseSlides(block.content) : [];
-        return `<article class="block-admin-card">
-          <span class="block-number">${index + 1}</span>
-          <span class="block-kind">${icon(block.block_type === "video" ? "play" : block.block_type === "slides" ? "presentation" : block.block_type === "text" ? "image" : "book")} ${escapeHtml(blockTypeLabels[block.block_type] || block.block_type)}</span>
-          <div class="block-admin-copy"><h3>${escapeHtml(block.title || blockTypeLabels[block.block_type])}</h3><p>${escapeHtml(compactText(block.content || (block.media_url ? "MÃ­dia vinculada Ã  etapa." : "Sem conteÃºdo.")))}</p>${slides.length ? `<small>${slides.length} slides</small>` : ""}${block.media_url ? `<small class="media-reference">MÃ­dia: ${escapeHtml(compactText(block.media_url, 80))}</small>` : ""}</div>
-          <div class="block-admin-actions"><button class="icon-btn" data-move-block="${block.id}" data-move-direction="up" ${index === 0 ? "disabled" : ""} aria-label="Mover para cima">â†‘</button><button class="icon-btn" data-move-block="${block.id}" data-move-direction="down" ${index === blocks.length - 1 ? "disabled" : ""} aria-label="Mover para baixo">â†“</button><button class="btn btn-small btn-secondary" data-edit-block="${block.id}">Alterar</button><button class="icon-btn danger-button" data-delete-block="${block.id}" data-item-title="${escapeHtml(block.title || blockTypeLabels[block.block_type])}" aria-label="Excluir linha">${icon("trash")}</button></div>
-        </article>`;
-      }).join("")}</div>` : emptyState("A aula ainda estÃ¡ vazia", "Adicione a primeira linha de aprendizagem. O texto antigo, quando existente, jÃ¡ foi convertido automaticamente.", `<button class="btn btn-primary" data-dialog="block">Criar primeira linha</button>`)}
-    </section>
-    <section class="card lesson-activity-builder">
-      <div class="card-head"><div><span class="eyebrow">Etapa final</span><h2>Atividade da aula</h2></div><button class="btn btn-small btn-secondary" data-dialog="activity">${icon("plus")} Adicionar atividade</button></div>
-      ${(activities || []).length ? `<div class="editor-list activities-editor">${activities.map((activity) => `<article><span>${activity.position}</span><div><strong>${escapeHtml(activity.title)}</strong><p>${escapeHtml(activity.instructions || "Sem instruÃ§Ãµes.")}</p><small>${formatDate(activity.due_at, true)}</small><div class="item-actions"><button class="text-link" data-edit-activity="${activity.id}">Alterar</button><button class="text-link danger-button" data-delete-activity="${activity.id}" data-item-title="${escapeHtml(activity.title)}">Excluir</button></div></div></article>`).join("")}</div>` : `<p class="muted-note">Opcional. Quando criada, a atividade aparece depois da Ãºltima linha de aprendizagem.</p>`}
-    </section>
-  `;
-}
-
-function readinessItem(label, ready, note) {
-  return `<div class="readiness-item"><span class="check-circle ${ready ? "done" : ""}">${ready ? icon("check") : ""}</span><div><strong>${label}</strong><small>${note}</small></div></div>`;
-}
-
-async function renderEnrollments(content) {
-  const [{ data: apprentices, error }, { data: courses }, { data: enrollments }] = await Promise.all([
-    supabase.from("profiles").select("id,full_name").eq("role", "apprentice").eq("is_active", true).order("full_name"),
-    supabase.from("courses").select("id,title,status").neq("status", "archived").order("title"),
-    supabase.from("enrollments").select("course_id,apprentice_id,assigned_at").order("assigned_at", { ascending: false }),
-  ]);
-  if (error) throw error;
-  const apprenticeMap = new Map((apprentices || []).map((item) => [item.id, item.full_name]));
-  const courseMap = new Map((courses || []).map((item) => [item.id, item.title]));
-
-  content.innerHTML = `
-    ${pageHead("MatrÃ­culas", "Vincule um jovem jÃ¡ convidado a um curso criado pela CAFCM.",
-      `<button class="btn btn-primary" data-dialog="enrollment" ${!apprentices?.length || !courses?.length ? "disabled" : ""}>${icon("link")} Nova matrÃ­cula</button>`)}
-    ${!apprentices?.length || !courses?.length ? `<div class="notice">Para matricular, Ã© necessÃ¡rio ter pelo menos um jovem convidado e um curso criado.</div>` : ""}
-    <section class="card">
-      ${enrollments?.length ? `<div class="list-table">
-        <div class="list-row enrollment-row list-header"><span>Jovem</span><span>Curso</span><span>Data</span><span></span></div>
-        ${enrollments.map((item) => `<div class="list-row enrollment-row"><strong>${escapeHtml(apprenticeMap.get(item.apprentice_id) || "Jovem")}</strong><span>${escapeHtml(courseMap.get(item.course_id) || "Curso")}</span><span>${formatDate(item.assigned_at)}</span><button class="icon-btn danger-button" data-remove-enrollment="${item.course_id}" data-apprentice="${item.apprentice_id}" aria-label="Remover matrÃ­cula">Ã—</button></div>`).join("")}
-      </div>` : emptyState("Nenhuma matrÃ­cula", "Quando houver jovens e cursos, crie aqui o primeiro vÃ­nculo.")}
-    </section>
-  `;
-}
-
-async function getStudentData() {
-  const userId = state.profile.id;
-  const [{ data: enrollments, error }, { data: progress }, { data: attempts }] = await Promise.all([
-    supabase.from("enrollments").select("course_id,assigned_at").eq("apprentice_id", userId),
-    supabase.from("lesson_progress").select("lesson_id,completed_at").eq("apprentice_id", userId),
-    supabase.from("activity_attempts").select("activity_id,status,submitted_at").eq("apprentice_id", userId),
-  ]);
-  if (error) throw error;
-  const ids = (enrollments || []).map((item) => item.course_id);
-  let courses = [];
-  let lessons = [];
-  if (ids.length) {
-    const [courseResult, lessonResult] = await Promise.all([
-      supabase.from("courses").select("*").in("id", ids).order("title"),
-      supabase.from("lessons").select("id,course_id").in("course_id", ids),
-    ]);
-    if (courseResult.error) throw courseResult.error;
-    courses = courseResult.data || [];
-    lessons = lessonResult.data || [];
-  }
-  const lessonCourse = new Map(lessons.map((lesson) => [lesson.id, lesson.course_id]));
-  const enrichedProgress = (progress || []).map((item) => ({ ...item, course_id: lessonCourse.get(item.lesson_id) }));
-  return { enrollments: enrollments || [], courses, lessons, progress: enrichedProgress, attempts: attempts || [] };
-}
-
-async function renderStudentHome(content) {
-  const data = await getStudentData();
-  const totalLessons = data.courses.reduce((sum, course) => sum + course.lessons_count, 0);
-  const completedLessons = data.progress.length;
-  const totalActivities = data.courses.reduce((sum, course) => sum + course.activities_count, 0);
-  const submitted = data.attempts.length;
-
-  content.innerHTML = `
-    ${pageHead(`OlÃ¡, ${escapeHtml(state.profile.full_name || "aprendiz")}!`, "Seu progresso Ã© atualizado conforme vocÃª conclui aulas e envia atividades.")}
-    <section class="metric-grid three">
-      ${metric("Cursos matriculados", data.courses.length, "book")}
-      ${metric("Aulas concluÃ­das", `${completedLessons} de ${totalLessons}`, "check")}
-      ${metric("Atividades enviadas", `${submitted} de ${totalActivities}`, "mail")}
-    </section>
-    <section class="card">
-      <div class="card-head"><div><span class="eyebrow">Continuar aprendendo</span><h2>Seus cursos</h2></div><button class="text-link" data-nav="student-courses">Ver todos</button></div>
-      ${data.courses.length ? `<div class="student-course-list">${data.courses.slice(0, 3).map((course) => studentCourseCard(course, data.progress)).join("")}</div>` : emptyState("Nenhum curso liberado", "Sua conta estÃ¡ ativa. Quando a CAFCM realizar uma matrÃ­cula, o curso aparecerÃ¡ aqui.")}
-    </section>
-  `;
-}
-
-function studentCourseCard(course, progress) {
-  const completed = progress.filter((item) => item.course_id === course.id).length;
-  const percent = progressPercent(completed, course.lessons_count);
-  return `<button class="student-course-row" data-open-course="${course.id}"><span class="course-symbol">${icon("book")}</span><div><strong>${escapeHtml(course.title)}</strong><small>${escapeHtml(course.category || "FormaÃ§Ã£o")} Â· ${formatWorkload(course.workload_hours)}</small><small>${course.lessons_count} aulas Â· ${course.activities_count} atividades</small><span class="progress-bar"><i style="width:${percent}%"></i></span></div><b>${percent}%</b>${icon("chevron")}</button>`;
-}
-
-async function renderStudentCourses(content) {
-  const data = await getStudentData();
-  const progressByCourse = new Map();
-  for (const item of data.progress) {
-    if (item.course_id) progressByCourse.set(item.course_id, (progressByCourse.get(item.course_id) || 0) + 1);
-  }
-
-  content.innerHTML = `
-    ${pageHead("Meus cursos", "Apenas formaÃ§Ãµes publicadas e vinculadas Ã  sua conta aparecem aqui.")}
-    <section class="course-grid">
-      ${data.courses.length ? data.courses.map((course) => {
-        const completed = progressByCourse.get(course.id) || 0;
-        const percent = progressPercent(completed, course.lessons_count);
-        return `<article class="course-card student-card"><span class="course-symbol">${icon("book")}</span><span class="course-category">${escapeHtml(course.category || "FormaÃ§Ã£o")}</span><h2>${escapeHtml(course.title)}</h2><p>${escapeHtml(course.description || "Sem descriÃ§Ã£o cadastrada.")}</p><small class="course-workload">${formatWorkload(course.workload_hours)}</small><div class="progress-line"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div><button class="btn btn-primary btn-block" data-open-course="${course.id}">Abrir curso ${icon("arrow")}</button></article>`;
-      }).join("") : emptyState("Nenhum curso liberado", "Aguarde a CAFCM realizar sua matrÃ­cula em uma formaÃ§Ã£o publicada.")}
-    </section>
-  `;
-}
-
-async function renderStudentActivities(content) {
-  const userId = state.profile.id;
-  const [{ data: enrollments, error }, { data: attempts }] = await Promise.all([
-    supabase.from("enrollments").select("course_id").eq("apprentice_id", userId),
-    supabase.from("activity_attempts").select("activity_id,status,submitted_at").eq("apprentice_id", userId),
-  ]);
-  if (error) throw error;
-  const courseIds = (enrollments || []).map((item) => item.course_id);
-  let activities = [];
-  let courses = [];
-  if (courseIds.length) {
-    const [activityResult, courseResult] = await Promise.all([
-      supabase.from("activities").select("*").in("course_id", courseIds).order("due_at", { ascending: true, nullsFirst: false }),
-      supabase.from("courses").select("id,title").in("id", courseIds),
-    ]);
-    activities = activityResult.data || [];
-    courses = courseResult.data || [];
-  }
-  const attemptMap = new Map((attempts || []).map((item) => [item.activity_id, item]));
-  const courseMap = new Map(courses.map((item) => [item.id, item.title]));
-
-  content.innerHTML = `
-    ${pageHead("Atividades", "Suas respostas ficam disponÃ­veis para vocÃª e para a equipe CAFCM.")}
-    <section class="activity-grid">
-      ${activities.length ? activities.map((activity) => {
-        const attempt = attemptMap.get(activity.id);
-        return `<article class="activity-card"><div><span class="eyebrow">${escapeHtml(courseMap.get(activity.course_id) || "Curso")}</span><h2>${escapeHtml(activity.title)}</h2><p>${escapeHtml(activity.instructions || "Sem instruÃ§Ãµes cadastradas.")}</p></div><div class="activity-foot"><span>${icon("calendar")} ${formatDate(activity.due_at, true)}</span>${attempt ? statusBadge(attempt.status) : `<button class="btn btn-primary btn-small" data-answer-activity="${activity.id}">Responder</button>`}</div></article>`;
-      }).join("") : emptyState("Nenhuma atividade disponÃ­vel", "As atividades dos seus cursos aparecerÃ£o aqui.")}
-    </section>
-  `;
-}
-
-async function renderStudentCourse(content) {
-  if (!state.selectedCourseId) return navigate("student-courses");
-  if (state.selectedLessonId) return renderStudentLesson(content);
-  const userId = state.profile.id;
-  const [{ data: course, error }, { data: lessons }, { data: activities }, { data: progress }, { data: attempts }] = await Promise.all([
-    supabase.from("courses").select("*").eq("id", state.selectedCourseId).single(),
-    supabase.from("lessons").select("*,lesson_blocks(id)").eq("course_id", state.selectedCourseId).order("position"),
-    supabase.from("activities").select("*").eq("course_id", state.selectedCourseId).order("position"),
-    supabase.from("lesson_progress").select("lesson_id").eq("apprentice_id", userId),
-    supabase.from("activity_attempts").select("activity_id,status").eq("apprentice_id", userId),
-  ]);
-  if (error || !course) throw error || new Error("Curso nÃ£o encontrado.");
-  const completed = new Set((progress || []).map((item) => item.lesson_id));
-  const attemptMap = new Map((attempts || []).map((item) => [item.activity_id, item.status]));
-  const percent = progressPercent((lessons || []).filter((item) => completed.has(item.id)).length, lessons?.length || 0);
-
-  content.innerHTML = `
-    <button class="back-button" data-nav="student-courses">â† Voltar aos cursos</button>
-    <header class="student-course-head"><div><span class="eyebrow">${escapeHtml(course.category || "Curso")}</span><h1>${escapeHtml(course.title)}</h1><p>${escapeHtml(course.description || "Sem descriÃ§Ã£o cadastrada.")}</p><small class="student-workload">${formatWorkload(course.workload_hours)}</small></div><div class="progress-ring"><strong>${percent}%</strong><small>concluÃ­do</small></div></header>
-    ${course.objectives ? `<section class="card student-objectives"><span class="eyebrow">O que vocÃª vai aprender</span><p>${escapeHtml(course.objectives)}</p></section>` : ""}
-    <div class="course-learning-grid">
-      <section class="card learning-list">
-        <div class="card-head"><div><span class="eyebrow">ConteÃºdo</span><h2>Aulas</h2></div></div>
-        ${lessons?.length ? lessons.map((lesson) => `
-          <article class="lesson-item ${completed.has(lesson.id) ? "complete" : ""}">
-            <span class="lesson-toggle">${completed.has(lesson.id) ? icon("check") : lesson.position}</span>
-            <div><small>Aula ${lesson.position}${lesson.estimated_minutes ? ` Â· ${lesson.estimated_minutes} min` : ""}</small><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.summary || "Abra a aula para percorrer as linhas de aprendizagem.")}</p><small>${lesson.lesson_blocks?.length || (lesson.content ? 1 : 0)} etapas de conteÃºdo</small></div>
-            <button class="btn btn-small ${completed.has(lesson.id) ? "btn-secondary" : "btn-primary"}" data-open-lesson="${lesson.id}">${completed.has(lesson.id) ? "Rever aula" : "Abrir aula"} ${icon("arrow")}</button>
-          </article>
-        `).join("") : emptyState("Nenhuma aula disponÃ­vel", "A CAFCM ainda estÃ¡ preparando este curso.")}
-      </section>
-      <aside class="card course-activities">
-        <div class="card-head"><div><span class="eyebrow">PrÃ¡tica</span><h2>Atividades complementares</h2></div></div>
-        ${activities?.filter((activity) => !activity.lesson_id).length ? activities.filter((activity) => !activity.lesson_id).map((activity) => `<article><div><strong>${escapeHtml(activity.title)}</strong><small>${formatDate(activity.due_at, true)}</small></div>${attemptMap.has(activity.id) ? statusBadge(attemptMap.get(activity.id)) : `<button class="btn btn-small btn-secondary" data-answer-activity="${activity.id}">Responder</button>`}</article>`).join("") : `<p class="muted-note">As atividades ligadas a uma aula aparecem como etapa final dentro dela.</p>`}
-      </aside>
-    </div>
-  `;
-}
-
-function videoMarkup(rawUrl, title) {
-  const safeUrl = safeHttpUrl(rawUrl);
-  if (!safeUrl) return `<div class="media-placeholder">${icon("play")}<p>Adicione uma URL de vÃ­deo vÃ¡lida a esta etapa.</p></div>`;
-  const url = new URL(safeUrl);
-  let embed = "";
-  if (url.hostname === "youtu.be") embed = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(url.pathname.slice(1))}`;
-  if (url.hostname.endsWith("youtube.com") && url.searchParams.get("v")) embed = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(url.searchParams.get("v"))}`;
-  if (url.hostname.endsWith("vimeo.com") && /^\/\d+/.test(url.pathname)) embed = `https://player.vimeo.com/video/${encodeURIComponent(url.pathname.split("/")[1])}`;
-  if (embed) return `<div class="video-frame"><iframe src="${escapeHtml(embed)}" title="${escapeHtml(title || "VÃ­deo da aula")}" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen></iframe></div>`;
-  if (/\.(mp4|webm|ogg)(\?|$)/i.test(safeUrl)) return `<video class="lesson-video" controls preload="metadata" src="${escapeHtml(safeUrl)}"></video>`;
-  return `<a class="external-media" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${icon("play")} Abrir vÃ­deo em uma nova janela</a>`;
-}
-
-function renderLearningBlock(block) {
-  const mediaUrl = safeHttpUrl(block.media_url);
-  const content = escapeHtml(block.content || "").replace(/\n/g, "<br>");
-  if (block.block_type === "slides") {
-    const slides = parseSlides(block.content);
-    const index = Math.min(state.blockSlideIndex, Math.max(0, slides.length - 1));
-    const slide = slides[index] || { title: "ApresentaÃ§Ã£o", body: "Nenhum slide foi cadastrado." };
-    return `<div class="inner-slide-deck"><div class="inner-slide"><small>Slide ${index + 1} de ${Math.max(1, slides.length)}</small><h2>${escapeHtml(slide.title)}</h2><p>${escapeHtml(slide.body).replace(/\n/g, "<br>")}</p>${mediaUrl ? `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(block.title || slide.title)}" loading="lazy" />` : ""}</div><div class="inner-slide-controls"><button class="btn btn-secondary" data-block-slide="back" ${index === 0 ? "disabled" : ""}>Anterior</button><div class="slide-dots">${slides.map((_, dot) => `<span class="${dot === index ? "active" : ""}"></span>`).join("")}</div><button class="btn btn-secondary" data-block-slide="next" ${index >= slides.length - 1 ? "disabled" : ""}>PrÃ³ximo slide</button></div></div>`;
-  }
-  if (block.block_type === "video") {
-    return `<div class="learning-video">${videoMarkup(block.media_url, block.title)}${content ? `<p class="supporting-text">${content}</p>` : ""}</div>`;
-  }
-  if (block.block_type === "considerations") {
-    return `<div class="considerations-box">${icon("book")}<div><h2>${escapeHtml(block.title || "ConsideraÃ§Ãµes")}</h2><p>${content || "Sem consideraÃ§Ãµes cadastradas."}</p></div></div>`;
-  }
-  return `<div class="text-learning-block"><div class="learning-copy"><p>${content || "ConteÃºdo ainda nÃ£o informado."}</p></div>${mediaUrl ? `<figure><img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(block.title || "Imagem da aula")}" loading="lazy" /><figcaption>${escapeHtml(block.title || "Imagem de apoio")}</figcaption></figure>` : ""}</div>`;
-}
-
-async function renderStudentLesson(content) {
-  const userId = state.profile.id;
-  const [{ data: course, error: courseError }, { data: lesson, error: lessonError }, { data: blocks }, { data: activities }, { data: progress }] = await Promise.all([
-    supabase.from("courses").select("id,title,category").eq("id", state.selectedCourseId).single(),
-    supabase.from("lessons").select("*").eq("id", state.selectedLessonId).eq("course_id", state.selectedCourseId).single(),
-    supabase.from("lesson_blocks").select("*").eq("lesson_id", state.selectedLessonId).order("position"),
-    supabase.from("activities").select("*").eq("lesson_id", state.selectedLessonId).order("position"),
-    supabase.from("lesson_progress").select("lesson_id,completed_at").eq("lesson_id", state.selectedLessonId).eq("apprentice_id", userId).maybeSingle(),
-  ]);
-  if (courseError || lessonError || !course || !lesson) throw courseError || lessonError || new Error("Aula nÃ£o encontrada.");
-  const learningBlocks = (blocks || []).length ? blocks : lesson.content ? [{ id: `legacy-${lesson.id}`, block_type: "text", title: "ConteÃºdo", content: lesson.content, media_url: null }] : [];
-  const steps = [...learningBlocks, ...((activities || []).length ? [{ id: `activities-${lesson.id}`, block_type: "activity", title: "Atividade" }] : [])];
-  const index = Math.min(state.lessonStepIndex, Math.max(0, steps.length - 1));
-  state.lessonStepIndex = index;
-  const step = steps[index];
-  const isLast = index >= steps.length - 1;
-  const completed = Boolean(progress);
-
-  content.innerHTML = `
-    <div class="lesson-player-shell">
-      <header class="lesson-player-top"><button class="back-button" data-return-student-course>â† Voltar ao curso</button><div><small>${escapeHtml(course.title)} Â· Aula ${lesson.position}</small><strong>${escapeHtml(lesson.title)}</strong></div><span>${steps.length ? `${index + 1}/${steps.length}` : "0/0"}</span></header>
-      <div class="lesson-player-progress"><i style="width:${steps.length ? ((index + 1) / steps.length) * 100 : 0}%"></i></div>
-      ${steps.length ? `<main class="lesson-stage"><div class="lesson-stage-label"><span>${step.block_type === "activity" ? icon("check") : icon(step.block_type === "video" ? "play" : step.block_type === "slides" ? "presentation" : step.block_type === "text" ? "image" : "book")}</span><small>${step.block_type === "activity" ? "Atividade da aula" : blockTypeLabels[step.block_type]}</small></div><h1>${escapeHtml(step.title || blockTypeLabels[step.block_type] || "Etapa da aula")}</h1>${step.block_type === "activity" ? `<div class="lesson-activity-step">${activities.map((activity) => `<article><div><strong>${escapeHtml(activity.title)}</strong><p>${escapeHtml(activity.instructions || "Responda Ã  atividade proposta.")}</p><small>${formatDate(activity.due_at, true)}</small></div><button class="btn btn-primary" data-answer-activity="${activity.id}">Responder atividade</button></article>`).join("")}</div>` : renderLearningBlock(step)}</main>` : `<main class="lesson-stage">${emptyState("Aula sem conteÃºdo", "A CAFCM ainda estÃ¡ preparando as linhas de aprendizagem desta aula.")}</main>`}
-      <footer class="lesson-player-actions"><button class="btn btn-secondary" data-lesson-step="back" ${index === 0 ? "disabled" : ""}>â† Etapa anterior</button><span>${completed ? `${icon("check")} Aula jÃ¡ concluÃ­da` : "Seu avanÃ§o Ã© salvo ao concluir"}</span>${isLast ? `<button class="btn btn-primary" data-complete-lesson="${lesson.id}">${completed ? "Voltar ao curso" : `Concluir aula ${icon("check")}`}</button>` : `<button class="btn btn-primary" data-lesson-step="next">PrÃ³xima etapa ${icon("arrow")}</button>`}</footer>
-    </div>
-  `;
-}
-
-async function getCompanyData() {
-  const [{ data: apprentices, error }, { data: enrollments }, { data: progress }, { data: attempts }] = await Promise.all([
-    supabase.from("profiles").select("id,full_name").eq("role", "apprentice").order("full_name"),
-    supabase.from("enrollments").select("course_id,apprentice_id,assigned_at"),
-    supabase.from("lesson_progress").select("lesson_id,course_id,apprentice_id"),
-    supabase.from("activity_attempts").select("activity_id,apprentice_id,status,submitted_at"),
-  ]);
-  if (error) throw error;
-  const courseIds = [...new Set((enrollments || []).map((item) => item.course_id))];
-  let courses = [];
-  let activities = [];
-  if (courseIds.length) {
-    const [c, a] = await Promise.all([
-      supabase.from("courses").select("id,title,lessons_count,activities_count").in("id", courseIds),
-      supabase.from("activities").select("id,course_id,title").in("course_id", courseIds),
-    ]);
-    courses = c.data || [];
-    activities = a.data || [];
-  }
-  return { apprentices: apprentices || [], enrollments: enrollments || [], progress: progress || [], attempts: attempts || [], courses, activities };
-}
-
-async function renderCompanyHome(content) {
-  const data = await getCompanyData();
-  const enrolled = new Set(data.enrollments.map((item) => item.apprentice_id)).size;
-  const submissions = data.attempts.length;
-  content.innerHTML = `
-    ${pageHead("Acompanhamento dos jovens", "Consulte o avanÃ§o nos cursos e os envios de atividades dos aprendizes vinculados Ã  sua empresa.")}
-    <section class="metric-grid three">
-      ${metric("Jovens vinculados", data.apprentices.length, "users")}
-      ${metric("Jovens com matrÃ­cula", enrolled, "book")}
-      ${metric("Atividades enviadas", submissions, "check")}
-    </section>
-    <section class="card">
-      <div class="card-head"><div><span class="eyebrow">Resumo</span><h2>Progresso dos aprendizes</h2></div><button class="text-link" data-nav="company-apprentices">Ver detalhes</button></div>
-      ${data.apprentices.length ? companyRows(data) : emptyState("Nenhum jovem vinculado", "Quando a CAFCM associar aprendizes Ã  empresa, o acompanhamento aparecerÃ¡ aqui.")}
-    </section>
-  `;
-}
-
-async function renderCompanyApprentices(content) {
-  const data = await getCompanyData();
-  content.innerHTML = `
-    ${pageHead("Aprendizes vinculados", "Use os indicadores de cada curso para acompanhar o estudo e orientar os prÃ³ximos passos com o jovem e a CAFCM.")}
-    <section class="card">${data.apprentices.length ? companyRows(data, true) : emptyState("Nenhum jovem vinculado", "A CAFCM Ã© responsÃ¡vel por criar e atualizar os vÃ­nculos.")}</section>
-  `;
-}
-
-function companyRows(data, detailed = false) {
-  const courseMap = new Map(data.courses.map((item) => [item.id, item]));
-  return `<div class="company-list">${data.apprentices.map((apprentice) => {
-    const enrollments = data.enrollments.filter((item) => item.apprentice_id === apprentice.id);
-    return `<article class="company-person"><div class="company-person-head"><span class="avatar">${escapeHtml(initials(apprentice.full_name))}</span><div><h2>${escapeHtml(apprentice.full_name || "Aprendiz")}</h2><small>${enrollments.length} ${enrollments.length === 1 ? "curso" : "cursos"}</small></div></div>
-      ${enrollments.length ? `<div class="company-course-list">${enrollments.map((enrollment) => {
-        const course = courseMap.get(enrollment.course_id);
-        if (!course) return "";
-        const completed = data.progress.filter((item) => item.apprentice_id === apprentice.id && item.course_id === course.id).length;
-        const submitted = data.attempts.filter((item) => item.apprentice_id === apprentice.id && data.activities.some((activity) => activity.id === item.activity_id && activity.course_id === course.id)).length;
-        const percent = progressPercent(completed, course.lessons_count);
-        const activityTotal = Number(course.activities_count || 0);
-        const studyStatus = percent === 100 && submitted >= activityTotal
-          ? ["ConcluÃ­do", "complete"]
-          : completed === 0 && submitted === 0
-            ? ["Ainda nÃ£o iniciou", "not-started"]
-            : ["Em andamento", "in-progress"];
-        return `<div class="company-course"><div><strong>${escapeHtml(course.title)}</strong><small>MatrÃ­cula em ${formatDate(enrollment.assigned_at)}</small>${detailed ? `<span class="study-status study-status-${studyStatus[1]}">${studyStatus[0]}</span>` : ""}</div><div class="company-progress"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div>${detailed ? `<small class="company-course-summary">${completed}/${course.lessons_count} aulas concluÃ­das Â· ${submitted}/${activityTotal} atividades enviadas</small>` : ""}</div>`;
-      }).join("")}</div>` : `<p class="muted-note">Ainda sem matrÃ­cula em curso.</p>`}
-    </article>`;
-  }).join("")}</div>`;
-}
-
-// The guide always describes the current page/subtab. It never changes navigation.
-function renderWizard() {
-  if (!state.profile || !canAccessView(state.view, state.profile)) return;
-  const dialog = document.querySelector("#overlay-root .dialog");
-  const guide = (dialog && buildFormGuide(dialog, dialog.querySelector("h2")?.textContent || "Cadastro"))
-    || getPageGuide(state, hasPermission);
-  if (!guide) return showToast("Esta tela ainda nÃ£o possui um guia.");
-  document.querySelector(".portal-shell")?.classList.remove("menu-open");
-  state.wizardOpen = pageTour.start(guide);
-}
-
-async function openDialog(type, recordId = null) {
-  pageTour.stop("dialog", false);
-  const root = document.querySelector("#overlay-root");
-  if (!root) return;
-  let body = "";
-
-  if (type === "my-profile") {
-    body = `<form id="my-profile-form" class="dialog-form">
-      <div class="form-grid two-columns">
-        <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus value="${escapeHtml(state.profile.full_name || "")}" /></label>
-        <label>E-mail de acesso<input value="${escapeHtml(state.session?.user?.email || "")}" disabled /><small>O e-mail Ã© alterado pela equipe CAFCM em Pessoas e convites.</small></label>
-      </div>
-      ${state.profile.role === "cafcm_admin" ? `<label>Departamento<input value="${escapeHtml(profileAccessLabel(state.profile))}" disabled /><small>Somente outro acesso da DireÃ§Ã£o e AdministraÃ§Ã£o pode alterar o seu departamento.</small></label>` : ""}
-      <div class="form-section"><span>SeguranÃ§a</span></div>
-      <label>Nova senha<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" placeholder="Deixe em branco para manter a atual" /><small>Use pelo menos 10 caracteres.</small></label>
-      <label>Confirmar nova senha<input name="confirmation" type="password" minlength="10" maxlength="128" autocomplete="new-password" /></label>
-      <p class="form-note">A troca de senha Ã© feita diretamente no serviÃ§o de autenticaÃ§Ã£o e o conteÃºdo da senha nÃ£o Ã© registrado.</p>
-      <button class="btn btn-primary" type="submit">Salvar meu perfil</button>
-    </form>`;
-  }
-
-  if (type === "company") {
-    let company = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("companies").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      company = data;
-    }
-    body = `<form id="company-form" class="dialog-form wide-form">
-      <input type="hidden" name="companyId" value="${escapeHtml(company.id || "")}" />
-      <div class="form-section"><span>IdentificaÃ§Ã£o</span></div>
-      <div class="form-grid two-columns">
-        <label>Nome fantasia<input name="name" required minlength="2" maxlength="160" autofocus value="${escapeHtml(company.name || "")}" /></label>
-        <label>RazÃ£o social<input name="legalName" minlength="2" maxlength="200" value="${escapeHtml(company.legal_name || "")}" /></label>
-        <label>CNPJ<input name="cnpj" inputmode="text" autocapitalize="characters" spellcheck="false" maxlength="18" placeholder="00.000.000/0000-00" value="${escapeHtml(formatCnpj(company.cnpj || "") === "CNPJ nÃ£o informado" ? "" : formatCnpj(company.cnpj))}" /><small>Aceita o formato numÃ©rico e o novo formato alfanumÃ©rico.</small></label>
-        <label>E-mail institucional<input name="email" type="email" maxlength="254" value="${escapeHtml(company.email || "")}" /></label>
-        <label>Telefone institucional<input name="phone" inputmode="tel" maxlength="20" value="${escapeHtml(company.phone || "")}" /></label>
-      </div>
-      <div class="form-section"><span>ResponsÃ¡vel na empresa</span></div>
-      <div class="form-grid two-columns">
-        <label>Nome<input name="contactName" minlength="2" maxlength="160" value="${escapeHtml(company.contact_name || "")}" /></label>
-        <label>Cargo<input name="contactRole" maxlength="120" value="${escapeHtml(company.contact_role || "")}" /></label>
-        <label>E-mail<input name="contactEmail" type="email" maxlength="254" value="${escapeHtml(company.contact_email || "")}" /></label>
-        <label>Telefone<input name="contactPhone" inputmode="tel" maxlength="20" value="${escapeHtml(company.contact_phone || "")}" /></label>
-      </div>
-      <div class="form-section"><span>EndereÃ§o</span></div>
-      <div class="form-grid address-grid">
-        <label>CEP<input name="postalCode" inputmode="numeric" maxlength="9" value="${escapeHtml(company.postal_code || "")}" /></label>
-        <label class="street-field">Logradouro<input name="street" maxlength="200" value="${escapeHtml(company.street || "")}" /></label>
-        <label>NÃºmero<input name="streetNumber" maxlength="30" value="${escapeHtml(company.street_number || "")}" /></label>
-        <label>Complemento<input name="addressComplement" maxlength="120" value="${escapeHtml(company.address_complement || "")}" /></label>
-        <label>Bairro<input name="district" maxlength="120" value="${escapeHtml(company.district || "")}" /></label>
-        <label>Cidade<input name="city" maxlength="120" value="${escapeHtml(company.city || "")}" /></label>
-        <label>UF<input name="state" maxlength="2" placeholder="SP" value="${escapeHtml(company.state || "")}" /></label>
-      </div>
-      <button class="btn btn-primary" type="submit">${recordId ? "Salvar alteraÃ§Ãµes" : "Cadastrar empresa"}</button>
-    </form>`;
-  }
-
-  if (["candidate", "vacancy", "application", "partnership", "candidate-conversion"].includes(type)) {
-    const references = await loadOperationalReferences();
-    if (type === "candidate") {
-      let item = {};
-      let candidateDocuments = [];
-      let events = [];
-      let selections = [];
-      if (recordId) {
-        const [candidateResult, documentResult, eventResult, selectionResult] = await Promise.all([
-          supabase.from("candidates").select("*").eq("id", recordId).single(),
-          supabase.from("candidate_documents").select("*").eq("candidate_id", recordId).order("created_at", { ascending: false }),
-          supabase.from("recruitment_events").select("*").eq("candidate_id", recordId).order("created_at", { ascending: false }).limit(60),
-          supabase.from("vacancy_applications").select("id,vacancy_id,status,updated_at").eq("candidate_id", recordId).order("updated_at", { ascending: false }),
-        ]);
-        if (candidateResult.error || documentResult.error || eventResult.error || selectionResult.error) throw candidateResult.error || documentResult.error || eventResult.error || selectionResult.error;
-        item = candidateResult.data;
-        candidateDocuments = documentResult.data || [];
-        events = eventResult.data || [];
-        selections = selectionResult.data || [];
-      }
-      const { data: vacancies } = recordId ? await supabase.from("job_vacancies").select("id,title,company_id") : { data: [] };
-      const vacancyMap = new Map((vacancies || []).map((vacancy) => [vacancy.id, vacancy]));
-      const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
-      const eventLabels = { "candidate.created": "Candidato cadastrado", "candidate.updated": "Dados atualizados", "candidate.status_changed": "SituaÃ§Ã£o atualizada", "application.created": "SeleÃ§Ã£o iniciada", "application.updated": "SeleÃ§Ã£o atualizada", "application.status_changed": "Etapa da seleÃ§Ã£o atualizada" };
-      body = `<form id="candidate-form" class="dialog-form wide-form"><input type="hidden" name="candidateId" value="${escapeHtml(item.id || "")}" />
-        <div class="form-section"><span>Dados do candidato</span></div><div class="form-grid two-columns">
-          <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus value="${escapeHtml(item.full_name || "")}" /></label>
-          <label>CPF<input name="cpf" maxlength="18" inputmode="numeric" value="${escapeHtml(item.cpf || "")}" /></label>
-          <label>E-mail<input name="email" type="email" maxlength="254" value="${escapeHtml(item.email || "")}" /></label>
-          <label>Telefone<input name="phone" maxlength="20" inputmode="tel" value="${escapeHtml(item.phone || "")}" /></label>
-          <label>Data de nascimento<input name="birthDate" type="date" value="${escapeHtml(item.birth_date || "")}" /></label>
-          <label>Escolaridade<input name="educationLevel" maxlength="120" value="${escapeHtml(item.education_level || "")}" placeholder="Ex.: Ensino mÃ©dio cursando" /></label>
-          <label>Cidade<input name="city" maxlength="120" value="${escapeHtml(item.city || "")}" /></label>
-          <label>Bairro<input name="neighborhood" maxlength="120" value="${escapeHtml(item.neighborhood || "")}" /></label>
-          <label>Origem do candidato<input name="source" maxlength="120" value="${escapeHtml(item.source || "")}" placeholder="Ex.: IndicaÃ§Ã£o, site, escola" /></label>
-          <label>SituaÃ§Ã£o<select name="status">${selectOptions(Object.fromEntries(Object.entries(candidateStatusLabels).filter(([value]) => value !== "hired")), item.status || "new")}${item.status === "hired" ? `<option value="hired" selected>Convertido em jovem</option>` : ""}</select></label>
-        </div><label>ObservaÃ§Ãµes internas<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>
-        <div class="form-section"><span>CurrÃ­culo e documentos</span></div>
-        <div class="form-grid two-columns"><label>Adicionar arquivo<input name="file" type="file" accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /></label><label>Tipo do arquivo<select name="documentCategory"><option value="resume">CurrÃ­culo</option><option value="identification">IdentificaÃ§Ã£o</option><option value="school">Escolaridade</option><option value="certificate">Certificado</option><option value="other">Outro</option></select></label></div>
-        <label>TÃ­tulo do arquivo<input name="documentTitle" maxlength="180" placeholder="Opcional: usa o nome do arquivo" /></label>
-        ${recordId ? `<div class="compact-record-list">${candidateDocuments.length ? candidateDocuments.map((document) => `<div><span>${icon("upload")}<strong>${escapeHtml(document.title)}</strong><small>${escapeHtml(document.category)} Â· ${formatDate(document.created_at, true)}</small></span><button type="button" class="btn btn-small btn-secondary" data-download-candidate-document="${document.id}">Baixar</button></div>`).join("") : `<p class="form-note">Nenhum arquivo enviado para este candidato.</p>`}</div>` : `<p class="form-note">VocÃª poderÃ¡ adicionar outros arquivos ao abrir o candidato novamente.</p>`}
-        ${recordId ? `<div class="form-section"><span>SeleÃ§Ãµes e histÃ³rico</span></div><div class="candidate-history-grid"><div><h3>Vagas</h3>${selections.length ? selections.map((selection) => { const vacancy = vacancyMap.get(selection.vacancy_id); return `<p><strong>${escapeHtml(vacancy?.title || "Vaga")}</strong><small>${escapeHtml(companyMap.get(vacancy?.company_id) || "Empresa")} Â· ${escapeHtml(applicationStatusLabels[selection.status] || selection.status)}</small></p>`; }).join("") : `<p class="form-note">Ainda nÃ£o participa de nenhuma seleÃ§Ã£o.</p>`}</div><div><h3>HistÃ³rico</h3>${events.length ? events.map((event) => `<p><strong>${escapeHtml(eventLabels[event.event_type] || event.event_type)}</strong><small>${event.from_status && event.to_status ? `${escapeHtml(applicationStatusLabels[event.from_status] || candidateStatusLabels[event.from_status] || event.from_status)} â†’ ${escapeHtml(applicationStatusLabels[event.to_status] || candidateStatusLabels[event.to_status] || event.to_status)} Â· ` : ""}${formatDate(event.created_at, true)}</small>${event.notes ? `<em>${escapeHtml(event.notes)}</em>` : ""}</p>`).join("") : `<p class="form-note">O histÃ³rico serÃ¡ formado conforme o processo avanÃ§ar.</p>`}</div></div>` : ""}
-        <button class="btn btn-primary" type="submit">${recordId ? "Salvar candidato" : "Cadastrar candidato"}</button></form>`;
-    }
-    if (type === "vacancy") {
-      let item = {};
-      if (recordId) {
-        const { data, error } = await supabase.from("job_vacancies").select("*").eq("id", recordId).single();
-        if (error) throw error;
-        item = data;
-      }
-      body = `<form id="vacancy-form" class="dialog-form wide-form"><input type="hidden" name="vacancyId" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.filter((company) => company.is_active || company.id === item.company_id).map((company) => `<option value="${company.id}" ${company.id === item.company_id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " Â· inativa"}</option>`).join("")}</select></label><label>Nome da vaga<input name="title" required maxlength="180" value="${escapeHtml(item.title || "")}" placeholder="Ex.: Jovem aprendiz administrativo" /></label><label>Quantidade<input name="quantity" type="number" min="1" max="999" value="${escapeHtml(item.quantity || 1)}" required /></label><label>Prazo<input name="dueDate" type="date" value="${escapeHtml(item.due_date || "")}" /></label><label>Jornada<input name="workload" maxlength="120" value="${escapeHtml(item.workload || "")}" placeholder="Ex.: 6 horas diÃ¡rias" /></label><label>Modelo de trabalho<input name="workModel" maxlength="80" value="${escapeHtml(item.work_model || "")}" placeholder="Ex.: Presencial" /></label><label>Local<input name="location" maxlength="180" value="${escapeHtml(item.location || "")}" placeholder="Cidade ou unidade" /></label><label>SalÃ¡rio mensal<input name="monthlySalary" type="number" min="0" step="0.01" value="${escapeHtml(item.monthly_salary || "")}" /></label><label>SituaÃ§Ã£o<select name="status">${selectOptions(vacancyStatusLabels, item.status || "open")}</select></label></div><label>Requisitos<textarea name="requirements" rows="4" maxlength="12000">${escapeHtml(item.requirements || "")}</textarea></label><label>ObservaÃ§Ãµes internas<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar vaga" : "Abrir vaga"}</button></form>`;
-    }
-    if (type === "application") {
-      let item = {};
-      if (recordId) {
-        const { data, error } = await supabase.from("vacancy_applications").select("*").eq("id", recordId).single();
-        if (error) throw error;
-        item = data;
-      }
-      const [candidates, vacancies] = await Promise.all([
-        supabase.from("candidates").select("id,full_name,status").not("status", "in", "(hired,archived)").order("full_name"),
-        supabase.from("job_vacancies").select("id,title,company_id,status").in("status", ["open", "paused"]),
-      ]);
-      if (candidates.error || vacancies.error) throw candidates.error || vacancies.error;
-      const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
-      const candidateOptions = (candidates.data || []).concat(item.candidate_id && !(candidates.data || []).some((candidate) => candidate.id === item.candidate_id) ? [{ id: item.candidate_id, full_name: "Candidato atual" }] : []);
-      const vacancyOptions = (vacancies.data || []).concat(item.vacancy_id && !(vacancies.data || []).some((vacancy) => vacancy.id === item.vacancy_id) ? [{ id: item.vacancy_id, title: "Vaga atual", company_id: null }] : []);
-      body = `<form id="application-form" class="dialog-form wide-form"><input type="hidden" name="applicationId" value="${escapeHtml(item.id || "")}" />${recordId ? `<input type="hidden" name="candidateId" value="${item.candidate_id}" /><input type="hidden" name="vacancyId" value="${item.vacancy_id}" />` : ""}<div class="form-grid two-columns"><label>Candidato<select name="candidateIdSelect" ${recordId ? "disabled" : "required"}><option value="">Selecione</option>${candidateOptions.map((candidate) => `<option value="${candidate.id}" ${candidate.id === item.candidate_id ? "selected" : ""}>${escapeHtml(candidate.full_name)}</option>`).join("")}</select></label><label>Vaga<select name="vacancyIdSelect" ${recordId ? "disabled" : "required"}><option value="">Selecione</option>${vacancyOptions.map((vacancy) => `<option value="${vacancy.id}" ${vacancy.id === item.vacancy_id ? "selected" : ""}>${escapeHtml(vacancy.title)} Â· ${escapeHtml(companyMap.get(vacancy.company_id) || "")}</option>`).join("")}</select></label><label>Etapa<select name="status">${selectOptions(Object.fromEntries(Object.entries(applicationStatusLabels).filter(([value]) => value !== "hired")), item.status || "received")}${item.status === "hired" ? `<option value="hired" selected>AdmissÃ£o iniciada</option>` : ""}</select></label><label>Entrevista na empresa<input name="companyInterviewAt" type="datetime-local" value="${formatDateTimeInput(item.company_interview_at)}" /></label></div>${recordId ? workflowProgress(applicationStatusLabels, item.status) : ""}<label>ObservaÃ§Ãµes da CAFCM<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><label>Retorno da empresa<textarea name="companyFeedback" rows="4" maxlength="12000">${escapeHtml(item.company_feedback || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar seleÃ§Ã£o" : "Iniciar seleÃ§Ã£o"}</button></form>`;
-    }
-    if (type === "candidate-conversion") {
-      const { data: application, error } = await supabase.from("vacancy_applications").select("id,candidate_id,vacancy_id,status").eq("id", recordId).single();
-      if (error) throw error;
-      const [{ data: candidate }, { data: vacancy }] = await Promise.all([
-        supabase.from("candidates").select("full_name,email").eq("id", application.candidate_id).single(),
-        supabase.from("job_vacancies").select("title,company_id").eq("id", application.vacancy_id).single(),
-      ]);
-      const company = references.companies.find((item) => item.id === vacancy.company_id);
-      body = `<form id="candidate-conversion-form" class="dialog-form"><input type="hidden" name="applicationId" value="${application.id}" /><div class="conversion-summary"><span>${icon("users")}</span><div><strong>${escapeHtml(candidate.full_name)}</strong><small>${escapeHtml(candidate.email || "E-mail nÃ£o cadastrado")}</small><small>${escapeHtml(vacancy.title)} Â· ${escapeHtml(company?.name || "Empresa")}</small></div></div><label>Data prevista para inÃ­cio<input name="targetStartDate" type="date" /></label><div class="dialog-instructions">Ao confirmar, o Portal cria ou atualiza o acesso de jovem aprendiz, envia o convite por e-mail quando necessÃ¡rio, transfere os dados do candidato e abre uma admissÃ£o com checklist. Nenhum dado precisa ser digitado novamente.</div><button class="btn btn-primary" type="submit">Confirmar e abrir admissÃ£o</button></form>`;
-    }
-    if (type === "partnership") {
-      let item = {};
-      if (recordId) {
-        const { data, error } = await supabase.from("partnership_agreements").select("*").eq("id", recordId).single();
-        if (error) throw error;
-        item = data;
-      }
-      const statusLabels = { draft: "Rascunho", active: "Ativa", expiring: "PrÃ³xima do fim", ended: "Encerrada", cancelled: "Cancelada" };
-      body = `<form id="partnership-form" class="dialog-form"><input type="hidden" name="partnershipId" value="${escapeHtml(item.id || "")}" /><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${company.id === item.company_id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>TÃ­tulo<input name="title" required maxlength="180" value="${escapeHtml(item.title || "Contrato de parceria")}" /></label><div class="form-grid two-columns"><label>InÃ­cio<input name="startDate" type="date" value="${escapeHtml(item.start_date || "")}" /></label><label>TÃ©rmino<input name="endDate" type="date" value="${escapeHtml(item.end_date || "")}" /></label><label>SituaÃ§Ã£o<select name="status">${selectOptions(statusLabels, item.status || "active")}</select></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary">${recordId ? "Salvar parceria" : "Registrar parceria"}</button></form>`;
-    }
-  }
-
-  if (type === "person") {
-    let person = state.people.find((item) => item.id === recordId);
-    if (!person) {
-      const result = await callAdmin({ action: "list_users" }, true);
-      state.people = result.users || [];
-      person = state.people.find((item) => item.id === recordId);
-    }
-    if (!person) throw new Error("A pessoa selecionada nÃ£o foi encontrada.");
-
-    const { data: companies, error } = await supabase.from("companies").select("id,name,is_active").order("is_active", { ascending: false }).order("name");
-    if (error) throw error;
-    const isSelf = person.id === state.profile.id;
-    const companyHidden = person.role === "cafcm_admin";
-    const departmentHidden = person.role !== "cafcm_admin";
-    const staffRoleOption = profileDepartment() === "management" ? `<option value="cafcm_admin" ${person.role === "cafcm_admin" ? "selected" : ""}>Equipe CAFCM</option>` : "";
-    body = `<form id="person-form" class="dialog-form">
-      <input type="hidden" name="userId" value="${person.id}" />
-      <div class="form-grid two-columns">
-        <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus value="${escapeHtml(person.fullName || "")}" /></label>
-        <label>E-mail<input name="email" type="email" maxlength="254" required value="${escapeHtml(person.email || "")}" /></label>
-      </div>
-      ${isSelf ? `<input type="hidden" name="role" value="${person.role}" /><label>Tipo de acesso<select disabled><option>${roleLabels[person.role]}</option></select><small>Para sua seguranÃ§a, vocÃª nÃ£o pode alterar o tipo do prÃ³prio acesso.</small></label>` : `<label>Tipo de acesso<select name="role" required><option value="apprentice" ${person.role === "apprentice" ? "selected" : ""}>Jovem aprendiz</option><option value="company" ${person.role === "company" ? "selected" : ""}>Representante de empresa</option>${staffRoleOption}</select></label>`}
-      <label class="company-field ${person.role === "company" ? "required-field" : ""}" ${companyHidden ? "hidden" : ""}>Empresa vinculada<select name="companyId" ${person.role === "company" ? "required" : ""} ${companyHidden ? "disabled" : ""}><option value="">Sem empresa vinculada</option>${(companies || []).map((company) => `<option value="${company.id}" ${person.companyId === company.id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " Â· inativa"}</option>`).join("")}</select><small>ObrigatÃ³ria para representantes e opcional para jovens.</small></label>
-      <label class="department-field" ${departmentHidden ? "hidden" : ""}>Departamento<select name="department" ${departmentHidden || isSelf ? "disabled" : "required"}>${departmentOptions(person.department || "management")}</select>${isSelf ? `<input type="hidden" name="department" value="${person.department || "management"}" />` : ""}<small>Define os menus e as informaÃ§Ãµes que a pessoa poderÃ¡ consultar ou alterar.</small></label>
-      <div class="form-section"><span>Credenciais</span></div>
-      <label>Alterar senha<select name="passwordMode"><option value="keep">Manter a senha atual</option><option value="random">Gerar nova senha temporÃ¡ria</option><option value="manual">Definir uma nova senha</option></select></label>
-      <label class="manual-password-field" hidden>Nova senha<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" /><small>Use de 10 a 128 caracteres. A senha nunca aparece no histÃ³rico de auditoria.</small></label>
-      <p class="form-note">AlteraÃ§Ãµes de perfil e empresa passam a valer integralmente no prÃ³ximo acesso da pessoa.${person.emailConfirmedAt ? "" : " Se alterar o e-mail, reenvie o convite depois de salvar."}</p>
-      <button class="btn btn-primary" type="submit">Salvar alteraÃ§Ãµes</button>
-    </form>`;
-  }
-
-  if (type === "person-history") {
-    let person = state.people.find((item) => item.id === recordId);
-    if (!person) {
-      const result = await callAdmin({ action: "list_users" }, true);
-      state.people = result.users || [];
-      person = state.people.find((item) => item.id === recordId);
-    }
-    if (!person) throw new Error("A pessoa selecionada nÃ£o foi encontrada.");
-    const history = await callAdmin({ action: "person_history", userId: recordId }, true);
-    body = `<div class="person-history">
-      <section class="history-person-head"><span class="avatar">${escapeHtml(initials(person.fullName))}</span><div><h3>${escapeHtml(person.fullName)}</h3><p>${escapeHtml(person.email)}</p></div><span class="role-pill">${roleLabels[person.role]}</span></section>
-      <section class="history-metrics"><div><strong>${history.enrollments.length}</strong><small>Cursos</small></div><div><strong>${history.completedLessons.length}</strong><small>Aulas concluÃ­das</small></div><div><strong>${history.activityAttempts.length}</strong><small>Atividades enviadas</small></div><div><strong>${history.audit.length}</strong><small>AÃ§Ãµes registradas</small></div></section>
-      <div class="history-columns">
-        <section><div class="form-section"><span>Aprendizagem concluÃ­da</span></div>${history.completedLessons.length ? `<div class="history-list">${history.completedLessons.map((item) => `<article>${icon("check")}<div><strong>${escapeHtml(item.lessons?.title || "Aula concluÃ­da")}</strong><small>${escapeHtml(item.courses?.title || "Curso")} Â· ${formatDate(item.completed_at, true)}</small></div></article>`).join("")}</div>` : `<p class="muted-note">Nenhuma aula concluÃ­da atÃ© agora.</p>`}</section>
-        <section><div class="form-section"><span>Atividades</span></div>${history.activityAttempts.length ? `<div class="history-list">${history.activityAttempts.map((item) => `<article>${icon("mail")}<div><strong>${escapeHtml(item.activities?.title || "Atividade")}</strong><small>${escapeHtml(item.activities?.courses?.title || "Curso")} Â· ${formatDate(item.submitted_at, true)}</small></div>${statusBadge(item.status)}</article>`).join("")}</div>` : `<p class="muted-note">Nenhuma atividade enviada atÃ© agora.</p>`}</section>
-      </div>
-      <section><div class="form-section"><span>Auditoria recente</span></div>${history.audit.length ? `<div class="mini-audit-list">${history.audit.slice(0, 20).map((item) => `<article><div><strong>${escapeHtml(auditActionLabels[item.action] || item.action)}</strong><small>${formatDate(item.occurred_at, true)}</small></div></article>`).join("")}</div>` : `<p class="muted-note">Nenhuma aÃ§Ã£o registrada para esta pessoa.</p>`}</section>
-      ${canAccessView("audit") ? `<button class="btn btn-secondary btn-block" data-view-person-audit="${person.id}">Abrir auditoria completa</button>` : ""}
-    </div>`;
-  }
-
-  if (type === "course") {
-    let course = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("courses").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      course = data;
-    }
-    body = `<form id="course-form" class="dialog-form">
-      <input type="hidden" name="courseId" value="${escapeHtml(course.id || "")}" />
-      <label>TÃ­tulo do curso<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(course.title || "")}" /></label>
-      <div class="form-grid two-columns">
-        <label>Categoria<input name="category" maxlength="120" placeholder="Ex.: PreparaÃ§Ã£o para o trabalho" value="${escapeHtml(course.category || "")}" /></label>
-        <label>Carga horÃ¡ria<input name="workloadHours" type="number" min="0" max="9999.99" step="0.25" placeholder="Ex.: 20" value="${escapeHtml(course.workload_hours || "")}" /></label>
-      </div>
-      <label>DescriÃ§Ã£o<textarea name="description" rows="4" maxlength="4000" placeholder="Resumo da formaÃ§Ã£o">${escapeHtml(course.description || "")}</textarea></label>
-      <label>Objetivos de aprendizagem<textarea name="objectives" rows="6" maxlength="8000" placeholder="O que o jovem deverÃ¡ compreender ou realizar ao concluir o curso">${escapeHtml(course.objectives || "")}</textarea></label>
-      <button class="btn btn-primary" type="submit">${recordId ? "Salvar alteraÃ§Ãµes" : "Criar curso"}</button>
-    </form>`;
-  }
-
-  if (type === "invite") {
-    const { data: companies } = await supabase.from("companies").select("id,name").eq("is_active", true).order("name");
-    const staffRoleOption = profileDepartment() === "management" ? `<option value="cafcm_admin">Equipe CAFCM</option>` : "";
-    body = `<form id="invite-form" class="dialog-form">
-      <div class="form-grid two-columns">
-        <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus /></label>
-        <label>E-mail<input name="email" type="email" maxlength="254" required /></label>
-      </div>
-      <label>Tipo de acesso<select name="role" required><option value="apprentice">Jovem aprendiz</option><option value="company">Representante de empresa</option>${staffRoleOption}</select></label>
-      <label class="company-field">Empresa vinculada<select name="companyId"><option value="">Sem empresa vinculada</option>${(companies || []).map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("")}</select><small>Opcional para o jovem e obrigatÃ³rio para representantes de empresa.</small></label>
-      <label class="department-field" hidden>Departamento<select name="department" disabled>${departmentOptions()}</select><small>O departamento define as Ã¡reas e os dados disponÃ­veis para a equipe CAFCM.</small></label>
-      <p class="form-note">O convite serÃ¡ enviado ao e-mail informado. A pessoa confirma o acesso pelo link e cria a prÃ³pria senha no primeiro acesso.</p>
-      <button class="btn btn-primary" type="submit">Criar acesso e enviar convite</button>
-    </form>`;
-  }
-
-  if (type === "people-import") {
-    const canRestoreHistory = profileDepartment() === "management";
-    body = `<form id="people-import-form" class="dialog-form">
-      <div class="import-explainer">${icon("upload")}<div><strong>Importe pessoas sem apagar o histÃ³rico existente</strong><p>Contas jÃ¡ cadastradas sÃ£o atualizadas pelo e-mail. Novas pessoas recebem convite para confirmar o acesso e criar a prÃ³pria senha.${canRestoreHistory ? " Um backup JSON tambÃ©m restaura matrÃ­culas, conclusÃµes e atividades quando os cursos ainda existem." : " A restauraÃ§Ã£o completa do histÃ³rico Ã© reservada Ã  DireÃ§Ã£o e AdministraÃ§Ã£o."}</p></div></div>
-      <label>${canRestoreHistory ? "Arquivo CSV ou backup JSON" : "Arquivo CSV"}<input name="peopleFile" type="file" accept="${canRestoreHistory ? ".csv,.json,text/csv,application/json" : ".csv,text/csv"}" required /><small>AtÃ© 100 pessoas por importaÃ§Ã£o. Use o modelo CSV disponÃ­vel na pÃ¡gina.</small></label>
-      <label class="confirmation-field"><input name="confirmImport" type="checkbox" value="yes" required /><span>Confirmo o envio de convites por e-mail para pessoas novas do arquivo.</span></label>
-      <div class="form-note">Perfis existentes mantÃªm suas matrÃ­culas e conclusÃµes. Senhas nÃ£o sÃ£o exportadas em backups.</div>
-      <button class="btn btn-primary" type="submit">Validar e importar pessoas</button>
-    </form>`;
-  }
-
-  if (type === "pipeline-item") {
-    if (!state.selectedPipelineId) throw new Error("Selecione uma esteira antes de criar um processo.");
-    const [pipelineResult, stagesResult, references] = await Promise.all([
-      supabase.from("pipelines").select("id,name").eq("id", state.selectedPipelineId).single(),
-      supabase.from("pipeline_stages").select("*").eq("pipeline_id", state.selectedPipelineId).eq("is_active", true).order("position"),
-      loadOperationalReferences(),
-    ]);
-    if (pipelineResult.error || stagesResult.error) throw pipelineResult.error || stagesResult.error;
-    let process = {};
-    let movements = [];
-    if (recordId) {
-      const [processResult, movementResult] = await Promise.all([
-        supabase.from("pipeline_items").select("*").eq("id", recordId).eq("pipeline_id", state.selectedPipelineId).single(),
-        supabase.from("pipeline_item_movements").select("*").eq("pipeline_item_id", recordId).order("moved_at", { ascending: false }).limit(20),
-      ]);
-      if (processResult.error || movementResult.error) throw processResult.error || movementResult.error;
-      process = processResult.data;
-      movements = movementResult.data || [];
-    }
-    const stages = stagesResult.data || [];
-    if (!stages.length) throw new Error("Esta esteira nÃ£o possui etapas ativas.");
-    const stageMap = new Map(stages.map((stage) => [stage.id, stage.name]));
-    const profileMap = new Map(references.profiles.map((profile) => [profile.id, profile.full_name]));
-    body = `<form id="pipeline-item-form" class="dialog-form wide-form">
-      <input type="hidden" name="processId" value="${escapeHtml(process.id || "")}" />
-      <input type="hidden" name="pipelineId" value="${escapeHtml(state.selectedPipelineId)}" />
-      <div class="form-section"><span>${escapeHtml(pipelineResult.data.name)}</span></div>
-      <label>TÃ­tulo do processo<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(process.title || "")}" /></label>
-      <label>DescriÃ§Ã£o<textarea name="description" rows="5" maxlength="12000" placeholder="Registre o contexto e a prÃ³xima providÃªncia">${escapeHtml(process.description || "")}</textarea></label>
-      <div class="form-grid two-columns">
-        <label>Etapa<select name="stageId" required>${stages.map((stage) => `<option value="${stage.id}" ${process.stage_id === stage.id ? "selected" : ""}>${escapeHtml(stage.name)}</option>`).join("")}</select></label>
-        <label>Prioridade<select name="priority" required>${Object.entries(priorityLabels).map(([value, label]) => `<option value="${value}" ${(process.priority || "normal") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-        <label>ResponsÃ¡vel CAFCM<select name="responsibleId"><option value="">Sem responsÃ¡vel</option>${references.administrators.map((person) => `<option value="${person.id}" ${process.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
-        <label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(process.due_at)}" /></label>
-        <label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${process.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " Â· inativa"}</option>`).join("")}</select></label>
-        <label>Jovem / aprendiz<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((person) => `<option value="${person.id}" ${process.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
-      </div>
-      <p class="form-note">Use o mesmo cadastro de empresa e de jovem em toda a operaÃ§Ã£o. MudanÃ§as de etapa ficam registradas na auditoria e no histÃ³rico do processo.</p>
-      <div class="dialog-form-actions">${recordId ? `<button class="btn btn-danger-soft" type="button" data-archive-pipeline-item="${recordId}" data-process-title="${escapeHtml(process.title)}">Arquivar processo</button>` : ""}<button class="btn btn-primary" type="submit">${recordId ? "Salvar alteraÃ§Ãµes" : "Criar processo"}</button></div>
-    </form>
-    ${recordId ? `<section class="movement-history"><div class="form-section"><span>HistÃ³rico de movimentaÃ§Ãµes</span></div>${movements.length ? movements.map((movement) => `<article><span>${icon("arrow")}</span><div><strong>${escapeHtml(stageMap.get(movement.from_stage_id) || "Etapa anterior")} â†’ ${escapeHtml(stageMap.get(movement.to_stage_id) || "Nova etapa")}</strong><small>${escapeHtml(profileMap.get(movement.moved_by) || "Sistema")} Â· ${formatDate(movement.moved_at, true)}</small></div></article>`).join("") : `<p class="muted-note">O processo ainda nÃ£o foi movido entre etapas.</p>`}</section>` : ""}`;
-  }
-
-  if (type === "task") {
-    const [references, processResult] = await Promise.all([
-      loadOperationalReferences(),
-      supabase.from("pipeline_items").select("id,title,pipeline_id").eq("is_archived", false).order("title"),
-    ]);
-    if (processResult.error) throw processResult.error;
-    let task = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("tasks").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      task = data;
-    }
-    const statusOptions = [
-      ["pending", "Pendente"],
-      ["in_progress", "Em andamento"],
-      ["waiting", "Aguardando terceiro"],
-      ["completed", "ConcluÃ­da"],
-      ["cancelled", "Cancelada"],
-    ];
-    const categories = ["AdmissÃ£o", "Desligamento", "Financeiro", "DP", "Recrutamento", "Empresas", "AcadÃªmico"];
-    body = `<form id="task-form" class="dialog-form wide-form">
-      <input type="hidden" name="taskId" value="${escapeHtml(task.id || "")}" />
-      <label>TÃ­tulo da tarefa<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(task.title || "")}" /></label>
-      <label>DescriÃ§Ã£o<textarea name="description" rows="5" maxlength="12000" placeholder="Informe o que precisa ser feito e o resultado esperado">${escapeHtml(task.description || "")}</textarea></label>
-      <div class="form-grid two-columns">
-        <label>Status<select name="status" required>${statusOptions.map(([value, label]) => `<option value="${value}" ${(task.status || "pending") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-        <label>Prioridade<select name="priority" required>${Object.entries(priorityLabels).map(([value, label]) => `<option value="${value}" ${(task.priority || "normal") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-        <label>Categoria<input name="category" list="task-categories" maxlength="100" value="${escapeHtml(task.category || "")}" placeholder="Selecione ou informe a categoria" /><datalist id="task-categories">${categories.map((category) => `<option value="${category}"></option>`).join("")}</datalist></label>
-        <label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(task.due_at)}" /></label>
-        <label>ResponsÃ¡vel<select name="assignedTo"><option value="">Sem responsÃ¡vel</option>${references.administrators.map((person) => `<option value="${person.id}" ${(task.assigned_to || (!recordId ? state.profile.id : "")) === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
-        <label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${task.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}${company.is_active ? "" : " Â· inativa"}</option>`).join("")}</select></label>
-        <label>Jovem / aprendiz<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((person) => `<option value="${person.id}" ${task.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label>
-        <label>Processo relacionado<select name="processId"><option value="">Sem processo vinculado</option>${(processResult.data || []).map((process) => `<option value="${process.id}" ${task.pipeline_item_id === process.id ? "selected" : ""}>${escapeHtml(process.title)}</option>`).join("")}</select></label>
-      </div>
-      <label>${recordId ? "Adicionar itens ao checklist" : "Checklist inicial"}<textarea name="checklistItems" rows="4" maxlength="5000" placeholder="Um item por linha"></textarea><small>${recordId ? "Os novos itens serÃ£o acrescentados aos jÃ¡ existentes." : "Opcional. Escreva um item por linha."}</small></label>
-      <p class="form-note">A pessoa responsÃ¡vel recebe uma notificaÃ§Ã£o interna quando a tarefa Ã© atribuÃ­da ou transferida.</p>
-      <button class="btn btn-primary" type="submit">${recordId ? "Salvar tarefa" : "Criar tarefa"}</button>
-    </form>`;
-  }
-
-  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge", "payable"].includes(type)) {
-    const references = await loadOperationalReferences();
-    const apprenticeOptions = references.apprentices.map((person) => `<option value="${person.id}">${escapeHtml(person.full_name)}</option>`).join("");
-    const companyOptions = references.companies.map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("");
-    const selectRecord = async (table) => {
-      if (!recordId) return {};
-      const { data, error } = await supabase.from(table).select("*").eq("id", recordId).single();
-      if (error) throw error;
-      return data;
-    };
-    if (type === "admission") {
-      const item = await selectRecord("admission_cases");
-      const checklist = recordId ? await supabase.from("admission_checklist_items").select("*").eq("admission_id", recordId).order("position") : { data: [] };
-      if (checklist.error) throw checklist.error;
-      body = `<form id="admission-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>InÃ­cio previsto<input name="targetStartDate" type="date" value="${escapeHtml(item.target_start_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(admissionStatusLabels, item.status || "approved")}</select></label></div>${recordId ? workflowProgress(admissionStatusLabels, item.status) : ""}<label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<div class="form-section"><span>Checklist da admissÃ£o</span></div><div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="check-${check.id}" ${check.is_completed ? "checked" : ""} /> <span>${escapeHtml(check.title)}</span></label>`).join("") || "Nenhum item criado"}</div><label>Adicionar itens ao checklist<textarea name="newChecklistItems" rows="3" maxlength="2000" placeholder="Digite um item por linha"></textarea><small>Os itens sÃ£o adicionados sem apagar o checklist jÃ¡ preenchido.</small></label>` : `<p class="form-note">Ao abrir a admissÃ£o, o Portal cria automaticamente o checklist padrÃ£o, uma pendÃªncia de acompanhamento e o envio Ã  contabilidade. Depois vocÃª pode marcar e personalizar os itens.</p>`}<button class="btn btn-primary" type="submit">${recordId ? "Salvar admissÃ£o" : "Abrir admissÃ£o"}</button></form>`;
-    }
-    if (type === "contract") {
-      const item = await selectRecord("contracts");
-      const contractStatusLabels = { scheduled: "A iniciar", active: "Ativo", closing: "Encerramento", ended: "Encerrado", cancelled: "Cancelado" };
-      body = `<form id="contract-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>InÃ­cio<input name="startDate" type="date" required value="${escapeHtml(item.start_date || "")}" /></label><label>TÃ©rmino<input name="endDate" type="date" required value="${escapeHtml(item.end_date || "")}" /></label><label>FunÃ§Ã£o<input name="positionTitle" maxlength="160" value="${escapeHtml(item.position_title || "")}" /></label><label>Jornada semanal<input name="weeklyHours" type="number" min="0" max="168" step="0.5" value="${escapeHtml(item.weekly_hours || "")}" /></label><label>SalÃ¡rio<input name="salary" type="number" min="0" step="0.01" value="${escapeHtml(item.salary || "")}" /></label><label>Status<select name="status">${selectOptions(contractStatusLabels, item.status || "scheduled")}</select></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar contrato" : "Cadastrar contrato"}</button></form>`;
-    }
-    if (type === "leave") {
-      const item = await selectRecord("leave_records");
-      const { data: contracts, error: contractError } = await supabase.from("contracts").select("id,apprentice_id,company_id,position_title,start_date,end_date").order("end_date", { ascending: false });
-      if (contractError) throw contractError;
-      const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
-      body = `<form id="leave-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Contrato relacionado<select name="contractId"><option value="">Sem contrato vinculado</option>${(contracts || []).map((contract) => `<option value="${contract.id}" ${item.contract_id === contract.id ? "selected" : ""}>${escapeHtml(references.profiles.find((person) => person.id === contract.apprentice_id)?.full_name || "Jovem")} Â· ${escapeHtml(companyMap.get(contract.company_id) || "Empresa")} Â· ${formatDate(contract.start_date)} a ${formatDate(contract.end_date)}</option>`).join("")}</select></label><label>Tipo<select name="leaveType">${selectOptions(leaveTypeLabels, item.leave_type || "vacation")}</select></label><label>Status<select name="status">${selectOptions(leaveStatusLabels, item.status || "planned")}</select></label><label>InÃ­cio<input name="startDate" type="date" required value="${escapeHtml(item.start_date || "")}" /></label><label>TÃ©rmino previsto<input name="endDate" type="date" required value="${escapeHtml(item.end_date || "")}" /></label><label>Retorno efetivo<input name="actualReturnDate" type="date" value="${escapeHtml(item.actual_return_date || "")}" /></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">Salvar registro</button></form>`;
-    }
-    if (type === "termination") {
-      const item = await selectRecord("termination_cases");
-      const checklist = recordId ? await supabase.from("termination_checklist_items").select("*").eq("termination_id", recordId).order("position") : { data: [], error: null };
-      if (checklist.error) throw checklist.error;
-      body = `<form id="termination-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Data de desligamento<input name="effectiveDate" type="date" value="${escapeHtml(item.effective_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(terminationStatusLabels, item.status || "request")}</select></label><label>Valor da rescisÃ£o<input name="terminationAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.termination_amount || "")}" /></label><label>Data do pagamento<input name="paymentDate" type="date" value="${escapeHtml(item.payment_date || "")}" /></label></div>${recordId ? workflowProgress(terminationStatusLabels, item.status) : ""}<label>Motivo<textarea name="reason" rows="3" maxlength="2000">${escapeHtml(item.reason || "")}</textarea></label><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<div class="form-section"><span>Checklist do desligamento</span></div><div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="termination-check-${check.id}" ${check.is_completed ? "checked" : ""} /> <span>${escapeHtml(check.title)}</span></label>`).join("") || "Nenhum item criado"}</div><label>Adicionar itens ao checklist<textarea name="newTerminationChecklistItems" rows="3" maxlength="2000" placeholder="Digite um item por linha"></textarea></label>` : `<p class="form-note">Ao abrir o desligamento, o Portal cria o checklist padrÃ£o de exame, contabilidade, rescisÃ£o, entrega e arquivamento.</p>`}<button class="btn btn-primary" type="submit">Salvar desligamento</button></form>`;
-    }
-    if (type === "accounting") {
-      const item = await selectRecord("accounting_dispatches");
-      const { data: documents, error: documentsError } = await supabase.from("document_records").select("id,title").eq("is_archived", false).order("created_at", { ascending: false }).limit(250);
-      if (documentsError) throw documentsError;
-      const dispatchTypes = { admission: "AdmissÃ£o", termination: "Desligamento", vacation: "FÃ©rias", leave: "Afastamento", payroll: "Folha", registration_change: "AlteraÃ§Ã£o cadastral", other: "Outro" };
-      body = `<form id="accounting-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><label>Assunto<input name="title" required maxlength="180" value="${escapeHtml(item.title || "")}" /></label><div class="form-grid two-columns"><label>Tipo<select name="dispatchType">${selectOptions(dispatchTypes, item.dispatch_type || "payroll")}</select></label><label>Etapa<select name="status">${selectOptions(accountingStatusLabels, item.status || "pending")}</select></label><label>CompetÃªncia<input name="competence" type="month" value="${escapeHtml(item.competence ? String(item.competence).slice(0, 7) : "")}" /></label><label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(item.due_at)}" /></label><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>ResponsÃ¡vel<select name="responsibleId"><option value="">Sem responsÃ¡vel</option>${references.administrators.map((person) => `<option value="${person.id}" ${item.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>ReferÃªncia externa<input name="externalReference" maxlength="180" value="${escapeHtml(item.external_reference || "")}" placeholder="Protocolo ou identificaÃ§Ã£o" /></label><label>Documento relacionado<select name="documentId"><option value="">Sem documento vinculado</option>${(documents || []).map((document) => `<option value="${document.id}" ${item.document_id === document.id ? "selected" : ""}>${escapeHtml(document.title)}</option>`).join("")}</select></label></div><label>DescriÃ§Ã£o<textarea name="description" rows="5" maxlength="12000">${escapeHtml(item.description || "")}</textarea></label><button class="btn btn-primary" type="submit">Salvar envio</button></form>`;
-    }
-    if (type === "document") {
-      const { data: requirements, error: requirementError } = await supabase.from("document_requirements").select("id,title,apprentice_id,company_id").eq("status", "pending").order("due_date", { ascending: true, nullsFirst: false });
-      if (requirementError) throw requirementError;
-      body = `<form id="document-form" class="dialog-form wide-form"><label>Arquivo<input name="file" type="file" accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></label><label>TÃ­tulo<input name="title" required maxlength="180" /></label><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${apprenticeOptions}</select></label><label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${companyOptions}</select></label><label>Categoria<select name="category">${selectOptions(documentCategoryLabels, "documents")}</select></label><label>Validade<input name="expiresOn" type="date" /></label><label>PendÃªncia atendida<select name="requirementId"><option value="">Nenhuma</option>${(requirements || []).map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join("")}</select></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="3" maxlength="4000"></textarea></label><p class="form-note">Os documentos ficam em Ã¡rea privada; somente a equipe CAFCM autorizada consegue acessar.</p><button class="btn btn-primary" type="submit">Enviar documento</button></form>`;
-    }
-    if (type === "document-edit") {
-      const item = await selectRecord("document_records");
-      body = `<form id="document-edit-form" class="dialog-form"><input type="hidden" name="id" value="${item.id}" /><label>TÃ­tulo<input name="title" required maxlength="180" value="${escapeHtml(item.title)}" /></label><div class="form-grid two-columns"><label>Categoria<select name="category">${selectOptions(documentCategoryLabels, item.category)}</select></label><label>Validade<input name="expiresOn" type="date" value="${escapeHtml(item.expires_on || "")}" /></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="4000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">Salvar documento</button></form>`;
-    }
-    if (type === "document-requirement") {
-      const item = await selectRecord("document_requirements");
-      const { data: documents, error: documentsError } = await supabase.from("document_records").select("id,title,apprentice_id,company_id").eq("is_archived", false).order("created_at", { ascending: false }).limit(250);
-      if (documentsError) throw documentsError;
-      body = `<form id="document-requirement-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><label>Documento necessÃ¡rio<input name="title" required maxlength="180" value="${escapeHtml(item.title || "")}" /></label><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId"><option value="">Sem empresa vinculada</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Categoria<select name="category">${selectOptions(documentCategoryLabels, item.category || "documents")}</select></label><label>SituaÃ§Ã£o<select name="status">${selectOptions(documentRequirementStatusLabels, item.status || "pending")}</select></label><label>Prazo<input name="dueDate" type="date" value="${escapeHtml(item.due_date || "")}" /></label><label>ResponsÃ¡vel<select name="responsibleId"><option value="">Sem responsÃ¡vel</option>${references.administrators.map((person) => `<option value="${person.id}" ${item.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Arquivo recebido<select name="documentId"><option value="">Sem arquivo vinculado</option>${(documents || []).map((document) => `<option value="${document.id}" ${item.document_id === document.id ? "selected" : ""}>${escapeHtml(document.title)}</option>`).join("")}</select></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="4000">${escapeHtml(item.notes || "")}</textarea></label><button class="btn btn-primary" type="submit">${recordId ? "Salvar pendÃªncia" : "Criar pendÃªncia"}</button></form>`;
-    }
-    if (type === "financial-charge") {
-      const item = await selectRecord("financial_charges");
-      const [{ data: contracts, error: contractsError }, { data: documents, error: documentsError }] = await Promise.all([
-        supabase.from("contracts").select("id,company_id,apprentice_id,start_date,end_date,position_title").order("end_date", { ascending: false }),
-        supabase.from("document_records").select("id,title,category").eq("is_archived", false).in("category", ["invoice", "payment_slip", "receipt", "finance"]).order("created_at", { ascending: false }).limit(250),
-      ]);
-      if (contractsError || documentsError) throw contractsError || documentsError;
-      const profileMap = new Map(references.profiles.map((person) => [person.id, person.full_name]));
-      const companyMap = new Map(references.companies.map((company) => [company.id, company.name]));
-      const documentOptions = (selected, category) => `<option value="">Sem arquivo vinculado</option>${(documents || []).filter((document) => document.category === category || document.category === "finance").map((document) => `<option value="${document.id}" ${selected === document.id ? "selected" : ""}>${escapeHtml(document.title)}</option>`).join("")}`;
-      body = `<form id="financial-charge-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>CompetÃªncia<input name="competence" type="month" required value="${escapeHtml(item.competence ? String(item.competence).slice(0, 7) : "")}" /></label><label>DescriÃ§Ã£o<input name="description" required maxlength="240" value="${escapeHtml(item.description || "")}" placeholder="Ex.: Mensalidade de aprendizagem" /></label><label>Valor<input name="amount" type="number" min="0" step="0.01" required value="${escapeHtml(item.amount ?? "")}" /></label><label>Vencimento<input name="dueDate" type="date" value="${escapeHtml(item.due_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(financialStatusLabels, item.status || "to_invoice")}</select></label><label>Contrato relacionado<select name="contractId"><option value="">Sem contrato vinculado</option>${(contracts || []).map((contract) => `<option value="${contract.id}" ${item.contract_id === contract.id ? "selected" : ""}>${escapeHtml(companyMap.get(contract.company_id) || "Empresa")} Â· ${escapeHtml(profileMap.get(contract.apprentice_id) || "Jovem")} Â· ${formatDate(contract.start_date)} a ${formatDate(contract.end_date)}</option>`).join("")}</select></label><label>ResponsÃ¡vel<select name="responsibleId"><option value="">Sem responsÃ¡vel</option>${references.administrators.map((person) => `<option value="${person.id}" ${item.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label></div><div class="form-section"><span>Nota fiscal e boleto</span></div><div class="form-grid two-columns"><label>NÃºmero da NF<input name="invoiceNumber" maxlength="120" value="${escapeHtml(item.invoice_number || "")}" /></label><label>Data de emissÃ£o da NF<input name="invoiceIssuedAt" type="datetime-local" value="${formatDateTimeInput(item.invoice_issued_at)}" /></label><label>NÃºmero do boleto<input name="paymentSlipNumber" maxlength="160" value="${escapeHtml(item.payment_slip_number || "")}" /></label><label>Data de emissÃ£o do boleto<input name="paymentSlipIssuedAt" type="datetime-local" value="${formatDateTimeInput(item.payment_slip_issued_at)}" /></label><label>Linha digitÃ¡vel<input name="paymentSlipLine" maxlength="240" value="${escapeHtml(item.payment_slip_line || "")}" /></label><label>Link do boleto<input name="paymentSlipUrl" type="url" maxlength="2048" value="${escapeHtml(item.payment_slip_url || "")}" /></label><label>Arquivo da NF<select name="invoiceDocumentId">${documentOptions(item.invoice_document_id, "invoice")}</select></label><label>Arquivo do boleto<select name="paymentSlipDocumentId">${documentOptions(item.payment_slip_document_id, "payment_slip")}</select></label></div><div class="form-section"><span>Recebimento</span></div><div class="form-grid two-columns"><label>Data do pagamento<input name="paidAt" type="datetime-local" value="${formatDateTimeInput(item.paid_at)}" /></label><label>Valor recebido<input name="paidAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.paid_amount ?? "")}" /></label><label>Comprovante<select name="receiptDocumentId">${documentOptions(item.receipt_document_id, "receipt")}</select></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><p class="form-note">Nesta etapa, NF, boleto, envio, vencimento e pagamento sÃ£o atualizados manualmente pelo Financeiro.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar cobranÃ§a" : "Criar cobranÃ§a"}</button></form>`;
-    }
-    if (type === "payable") {
-      const item = await selectRecord("accounts_payable");
-      const { data: documents, error: documentsError } = await supabase.from("document_records").select("id,title,category").eq("is_archived", false).in("category", ["finance", "invoice", "payment_slip", "receipt", "other"]).order("created_at", { ascending: false }).limit(250);
-      if (documentsError) throw documentsError;
-      const documentOptions = (selected) => `<option value="">Sem arquivo vinculado</option>${(documents || []).map((document) => `<option value="${document.id}" ${selected === document.id ? "selected" : ""}>${escapeHtml(document.title)}</option>`).join("")}`;
-      body = `<form id="payable-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Fornecedor ou favorecido<input name="supplierName" required maxlength="200" value="${escapeHtml(item.supplier_name || "")}" placeholder="Ex.: Companhia de energia" /></label><label>CPF ou CNPJ<input name="supplierDocument" maxlength="32" value="${escapeHtml(item.supplier_document || "")}" /></label><label>Categoria<input name="category" required maxlength="80" value="${escapeHtml(item.category || "")}" placeholder="Ex.: Energia, imposto, fornecedor" /></label><label>CompetÃªncia<input name="competence" type="month" value="${escapeHtml(item.competence ? String(item.competence).slice(0, 7) : "")}" /></label><label>DescriÃ§Ã£o<input name="description" required maxlength="240" value="${escapeHtml(item.description || "")}" placeholder="Ex.: Fatura mensal" /></label><label>Valor<input name="amount" type="number" min="0.01" step="0.01" required value="${escapeHtml(item.amount ?? "")}" /></label><label>Vencimento<input name="dueDate" type="date" required value="${escapeHtml(item.due_date || "")}" /></label><label>Pagamento previsto<input name="plannedPaymentDate" type="date" value="${escapeHtml(item.planned_payment_date || "")}" /></label><label>SituaÃ§Ã£o<select name="status">${selectOptions(payableStatusLabels, item.status || "pending")}</select></label><label>Forma de controle<select name="paymentMethod"><option value="manual" ${item.payment_method !== "bradesco" ? "selected" : ""}>Manual</option><option value="bradesco" ${item.payment_method === "bradesco" ? "selected" : ""}>Bradesco (ainda sem envio automÃ¡tico)</option></select></label><label>ResponsÃ¡vel<select name="responsibleId"><option value="">Sem responsÃ¡vel</option>${references.administrators.map((person) => `<option value="${person.id}" ${item.responsible_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Lembretes antes do vencimento<input name="reminderDays" inputmode="numeric" maxlength="20" value="${escapeHtml((item.reminder_days || [7, 3, 1]).join(", "))}" placeholder="Ex.: 7, 3, 1" /><small>Em dias; mÃ¡ximo de cinco valores.</small></label></div><div class="form-section"><span>Documento e pagamento</span></div><div class="form-grid two-columns"><label>CÃ³digo de barras<input name="barcode" maxlength="260" value="${escapeHtml(item.barcode || "")}" /></label><label>ReferÃªncia externa<input name="externalReference" maxlength="160" value="${escapeHtml(item.external_reference || "")}" placeholder="NÃºmero da fatura ou protocolo" /></label><label>Documento da despesa<select name="documentId">${documentOptions(item.document_id)}</select></label><label>Comprovante<select name="receiptDocumentId">${documentOptions(item.receipt_document_id)}</select></label><label>Data do pagamento<input name="paidAt" type="datetime-local" value="${formatDateTimeInput(item.paid_at)}" /></label><label>Valor pago<input name="paidAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.paid_amount ?? "")}" /></label></div><label>ObservaÃ§Ãµes<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><p class="form-note">O Portal organiza a conta, calendÃ¡rio e lembretes. Nenhum pagamento Ã© enviado ao banco nesta etapa.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar conta a pagar" : "Criar conta a pagar"}</button></form>`;
-    }
-  }
-
-  if (type === "email-draft") {
-    let delivery = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("email_deliveries").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      delivery = data;
-    }
-    const [{ data: templates, error: templateError }, { data: documents, error: documentError }] = await Promise.all([
-      supabase.from("email_templates").select("*").eq("is_active", true).order("name"),
-      supabase.from("document_records").select("id,title").eq("is_archived", false).order("created_at", { ascending: false }).limit(150),
-    ]);
-    if (templateError || documentError) throw templateError || documentError;
-    const selected = (templates || []).find((item) => item.id === delivery.template_id) || templates?.[0] || {};
-    body = `<form id="email-draft-form" class="dialog-form wide-form"><input type="hidden" name="deliveryId" value="${escapeHtml(delivery.id || "")}" /><label>Modelo<select name="templateId" required data-email-template><option value="">Selecione</option>${(templates || []).map((item) => `<option value="${item.id}" data-subject="${escapeHtml(item.subject)}" data-body="${escapeHtml(item.body)}" ${item.id === selected.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>DestinatÃ¡rio<input name="recipientEmail" type="email" required maxlength="320" placeholder="financeiro@empresa.com.br" value="${escapeHtml(delivery.recipient_email || "")}" /></label><label>Anexo opcional<select name="attachmentDocumentId"><option value="">Sem anexo</option>${(documents || []).map((item) => `<option value="${item.id}" ${item.id === delivery.attachment_document_id ? "selected" : ""}>${escapeHtml(item.title)}</option>`).join("")}</select></label></div><label>Assunto<input name="subject" required minlength="2" maxlength="240" value="${escapeHtml(delivery.subject || selected.subject || "")}" /></label><label>ConteÃºdo<textarea name="body" rows="12" required maxlength="100000">${escapeHtml(delivery.body || selected.body || "")}</textarea><small>Substitua os campos entre chaves pelas informaÃ§Ãµes reais antes de salvar.</small></label><p class="form-note">O rascunho nÃ£o serÃ¡ enviado automaticamente. Depois de salvar, use â€œConferir e enviarâ€.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar conferÃªncia" : "Salvar rascunho"}</button></form>`;
-  }
-
-  if (type === "document-generation") {
-    const [{ data: templates, error: templateError }, references] = await Promise.all([
-      supabase.from("document_templates").select("id,name,category").eq("is_active", true).order("name"),
-      loadOperationalReferences(),
-    ]);
-    if (templateError) throw templateError;
-    body = `<form id="document-generation-form" class="dialog-form wide-form"><label>Modelo do documento<select name="templateId" required><option value="">Selecione</option>${(templates || []).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId"><option value="">Sem jovem vinculado</option>${references.apprentices.map((item) => `<option value="${item.id}">${escapeHtml(item.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId"><option value="">Usar a empresa do jovem</option>${references.companies.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></label><label>PerÃ­odo<input name="periodo" maxlength="300" placeholder="Ex.: 10/02/2026 a 10/02/2027" /></label><label>Prazo<input name="prazo" maxlength="120" placeholder="Ex.: 15/09/2026" /></label><label>CompetÃªncia<input name="competencia" maxlength="120" placeholder="Ex.: setembro de 2026" /></label><label>Valor informado<input name="valor" maxlength="120" placeholder="Ex.: R$ 1.250,00" /></label></div><label>Documentos solicitados<textarea name="documentos" rows="3" maxlength="2000" placeholder="Liste os documentos quando o modelo exigir"></textarea></label><label>DescriÃ§Ã£o<textarea name="descricao" rows="3" maxlength="1000"></textarea></label><label>ObservaÃ§Ãµes do documento<textarea name="observacoes" rows="4" maxlength="4000"></textarea></label><label>Notas internas da revisÃ£o<textarea name="notes" rows="3" maxlength="12000"></textarea></label><p class="form-note">O PDF receberÃ¡ protocolo, versÃ£o e situaÃ§Ã£o â€œAguardando revisÃ£oâ€. Dados nÃ£o preenchidos serÃ£o identificados como nÃ£o informados.</p><button class="btn btn-primary" type="submit">Gerar PDF para revisÃ£o</button></form>`;
-  }
-
-  if (type === "banking-integration") {
-    let item = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("banking_integrations").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      item = data;
-    }
-    const statusLabels = { awaiting_documents: "Aguardando documentaÃ§Ã£o", configuring: "Em configuraÃ§Ã£o", homologation: "Em homologaÃ§Ã£o", active: "Ativa", inactive: "Inativa" };
-    body = `<form id="banking-integration-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Banco<input value="Bradesco Â· 237" disabled /></label><label>Modelo de integraÃ§Ã£o<select name="integrationMode"><option value="cnab240" ${item.integration_mode === "cnab240" ? "selected" : ""}>CNAB 240</option><option value="cnab400" ${item.integration_mode === "cnab400" ? "selected" : ""}>CNAB 400</option><option value="api" ${item.integration_mode === "api" ? "selected" : ""}>API bancÃ¡ria</option></select></label><label>SituaÃ§Ã£o<select name="status">${selectOptions(statusLabels, item.status || "awaiting_documents")}</select></label><label>NÃºmero do convÃªnio<input name="agreementNumber" maxlength="80" value="${escapeHtml(item.agreement_number || "")}" /></label><label>Carteira<input name="walletCode" maxlength="40" value="${escapeHtml(item.wallet_code || "")}" /></label><label>VersÃ£o do leiaute<input name="layoutVersion" maxlength="40" value="${escapeHtml(item.layout_version || "")}" /></label><label>AgÃªncia<input name="agency" maxlength="20" value="${escapeHtml(item.agency || "")}" /></label><label>ReferÃªncia da conta<input name="accountReference" maxlength="40" value="${escapeHtml(item.account_reference || "")}" /></label></div><label>InformaÃ§Ãµes recebidas do banco<textarea name="notes" rows="7" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label><p class="form-note">NÃ£o informe senha, token, chave privada ou segredo neste formulÃ¡rio. A situaÃ§Ã£o â€œAtivaâ€ deve ser usada somente apÃ³s homologaÃ§Ã£o confirmada pelo Bradesco.</p><button class="btn btn-primary" type="submit">${recordId ? "Salvar configuraÃ§Ã£o" : "Criar preparaÃ§Ã£o"}</button></form>`;
-  }
-
-  if (type === "lesson") {
-    let lesson = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("lessons").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      lesson = data;
-    }
-    body = `<form id="lesson-form" class="dialog-form">
-      <input type="hidden" name="lessonId" value="${escapeHtml(lesson.id || "")}" />
-      <label>TÃ­tulo da aula<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(lesson.title || "")}" /></label>
-      <label>Resumo da aula<textarea name="summary" rows="4" maxlength="2000" placeholder="Explique em poucas linhas o que serÃ¡ estudado">${escapeHtml(lesson.summary || "")}</textarea></label>
-      <label>DuraÃ§Ã£o estimada em minutos<input name="estimatedMinutes" type="number" min="1" max="1440" step="1" value="${escapeHtml(lesson.estimated_minutes || "")}" /></label>
-      <p class="form-note">Depois de salvar a aula, abra â€œEstruturar aulaâ€ para adicionar texto, slides, vÃ­deo, consideraÃ§Ãµes e a atividade final.</p>
-      <button class="btn btn-primary" type="submit">${recordId ? "Salvar alteraÃ§Ãµes" : "Adicionar aula"}</button>
-    </form>`;
-  }
-
-  if (type === "block") {
-    if (!state.selectedLessonId) throw new Error("Selecione uma aula antes de adicionar conteÃºdo.");
-    let block = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("lesson_blocks").select("*").eq("id", recordId).eq("lesson_id", state.selectedLessonId).single();
-      if (error) throw error;
-      block = data;
-    }
-    body = `<form id="block-form" class="dialog-form wide-form">
-      <input type="hidden" name="blockId" value="${escapeHtml(block.id || "")}" />
-      <div class="form-grid two-columns">
-        <label>Tipo da linha<select name="blockType" required><option value="text" ${block.block_type === "text" ? "selected" : ""}>Texto com imagem opcional</option><option value="slides" ${block.block_type === "slides" ? "selected" : ""}>ApresentaÃ§Ã£o em slides</option><option value="video" ${block.block_type === "video" ? "selected" : ""}>VÃ­deo</option><option value="considerations" ${block.block_type === "considerations" ? "selected" : ""}>ConsideraÃ§Ãµes finais</option></select></label>
-        <label>TÃ­tulo da etapa<input name="title" maxlength="180" required value="${escapeHtml(block.title || "")}" placeholder="Ex.: ComunicaÃ§Ã£o no ambiente de trabalho" /></label>
-      </div>
-      <label>ConteÃºdo<textarea name="content" rows="12" maxlength="60000" placeholder="Para slides: escreva o tÃ­tulo na primeira linha e o conteÃºdo abaixo. Separe cada slide com uma linha contendo ---">${escapeHtml(block.content || "")}</textarea><small>Em â€œSlidesâ€, separe os slides com uma linha contendo trÃªs traÃ§os: ---. O primeiro texto de cada parte vira o tÃ­tulo.</small></label>
-      <label>URL de imagem ou vÃ­deo<input name="mediaUrl" type="url" maxlength="2048" placeholder="https://..." value="${escapeHtml(block.media_url || "")}" /><small>Opcional para texto e slides; necessÃ¡ria para vÃ­deo. Aceita YouTube, Vimeo ou arquivo de vÃ­deo direto.</small></label>
-      <button class="btn btn-primary" type="submit">${recordId ? "Salvar linha de aprendizagem" : "Adicionar linha Ã  aula"}</button>
-    </form>`;
-  }
-
-  if (type === "activity") {
-    const { data: lessons } = await supabase.from("lessons").select("id,title").eq("course_id", state.selectedCourseId).order("position");
-    let activity = {};
-    if (recordId) {
-      const { data, error } = await supabase.from("activities").select("*").eq("id", recordId).single();
-      if (error) throw error;
-      activity = data;
-    }
-    body = `<form id="activity-form" class="dialog-form">
-      <input type="hidden" name="activityId" value="${escapeHtml(activity.id || "")}" />
-      <label>TÃ­tulo da atividade<input name="title" required minlength="2" maxlength="180" autofocus value="${escapeHtml(activity.title || "")}" /></label>
-      <label>InstruÃ§Ãµes<textarea name="instructions" rows="7" maxlength="12000">${escapeHtml(activity.instructions || "")}</textarea></label>
-      <div class="form-grid two-columns">
-        <label>Aula relacionada<select name="lessonId"><option value="">Sem aula especÃ­fica</option>${(lessons || []).map((lesson) => `<option value="${lesson.id}" ${activity.lesson_id === lesson.id || (!recordId && state.selectedLessonId === lesson.id) ? "selected" : ""}>${escapeHtml(lesson.title)}</option>`).join("")}</select></label>
-        <label>Prazo<input name="dueAt" type="datetime-local" value="${formatDateTimeInput(activity.due_at)}" /></label>
-      </div>
-      <button class="btn btn-primary" type="submit">${recordId ? "Salvar alteraÃ§Ãµes" : "Adicionar atividade"}</button>
-    </form>`;
-  }
-
-  if (type === "enrollment") {
-    const [{ data: apprentices }, { data: courses }] = await Promise.all([
-      supabase.from("profiles").select("id,full_name").eq("role", "apprentice").eq("is_active", true).order("full_name"),
-      supabase.from("courses").select("id,title,status").neq("status", "archived").order("title"),
-    ]);
-    body = `<form id="enrollment-form" class="dialog-form"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${(apprentices || []).map((item) => `<option value="${item.id}">${escapeHtml(item.full_name)}</option>`).join("")}</select></label><label>Curso<select name="courseId" required><option value="">Selecione</option>${(courses || []).map((item) => `<option value="${item.id}">${escapeHtml(item.title)} Â· ${item.status === "published" ? "Publicado" : "Rascunho"}</option>`).join("")}</select></label><button class="btn btn-primary" type="submit">Criar matrÃ­cula</button></form>`;
-  }
-
-  if (type === "response") {
-    const [{ data: activity }, { data: response }] = await Promise.all([
-      supabase.from("activities").select("id,title,instructions,due_at").eq("id", state.selectedActivityId).single(),
-      supabase.from("activity_responses").select("response_text").eq("activity_id", state.selectedActivityId).eq("apprentice_id", state.profile.id).maybeSingle(),
-    ]);
-    body = `<form id="response-form" class="dialog-form"><p class="dialog-instructions">${escapeHtml(activity?.instructions || "Responda Ã  atividade proposta.")}</p><label>Sua resposta<textarea name="responseText" rows="9" maxlength="20000" required autofocus>${escapeHtml(response?.response_text || "")}</textarea><small>A empresa verÃ¡ apenas que a atividade foi enviada.</small></label><button class="btn btn-primary" type="submit">Enviar atividade</button></form>`;
-  }
-
-  const titles = {
-    "my-profile": "Meu perfil e senha",
-    company: recordId ? "Alterar empresa" : "Cadastrar empresa",
-    person: "Alterar dados da pessoa",
-    "person-history": "HistÃ³rico da pessoa",
-    "people-import": "Importar pessoas",
-    "pipeline-item": recordId ? "Alterar processo" : "Novo processo",
-    task: recordId ? "Alterar tarefa" : "Nova tarefa",
-    admission: recordId ? "Alterar admissÃ£o" : "Nova admissÃ£o",
-    contract: recordId ? "Alterar contrato" : "Novo contrato",
-    leave: recordId ? "Alterar perÃ­odo" : "FÃ©rias ou afastamento",
-    termination: recordId ? "Alterar desligamento" : "Abrir desligamento",
-    accounting: recordId ? "Alterar envio" : "Novo envio Ã  contabilidade",
-    document: "Enviar documento",
-    "document-edit": "Alterar documento",
-    "document-requirement": recordId ? "Alterar pendÃªncia documental" : "Nova pendÃªncia documental",
-    "financial-charge": recordId ? "Alterar cobranÃ§a" : "Nova cobranÃ§a",
-    payable: recordId ? "Alterar conta a pagar" : "Nova conta a pagar",
-    "email-draft": recordId ? "Conferir e-mail" : "Preparar e-mail",
-    "document-generation": "Gerar documento",
-    "banking-integration": recordId ? "Alterar preparaÃ§Ã£o Bradesco" : "Preparar integraÃ§Ã£o Bradesco",
-    candidate: recordId ? "Candidato e histÃ³rico" : "Cadastrar candidato",
-    vacancy: recordId ? "Alterar vaga" : "Abrir vaga",
-    application: recordId ? "Atualizar processo seletivo" : "Iniciar processo seletivo",
-    "candidate-conversion": "Iniciar admissÃ£o do aprovado",
-    partnership: recordId ? "Alterar parceria" : "Registrar parceria",
-    course: recordId ? "Alterar curso" : "Criar curso",
-    invite: "Criar pessoa e enviar convite",
-    lesson: recordId ? "Alterar aula" : "Adicionar aula",
-    block: recordId ? "Alterar linha de aprendizagem" : "Nova linha de aprendizagem",
-    activity: recordId ? "Alterar atividade" : "Adicionar atividade",
-    enrollment: "Nova matrÃ­cula",
-    response: "Responder atividade",
-  };
-  const wideDialog = ["company", "candidate", "vacancy", "application", "admission", "leave", "termination", "accounting", "document", "document-requirement", "financial-charge", "payable", "email-draft", "document-generation", "banking-integration", "block", "person-history", "people-import", "pipeline-item", "task"].includes(type);
-  root.innerHTML = `<div class="dialog-backdrop"><section class="dialog ${wideDialog ? "dialog-wide" : ""}" role="dialog" aria-modal="true"><div class="dialog-head"><div><span class="eyebrow">Portal CAFCM</span><h2>${titles[type]}</h2></div><div class="dialog-help-actions">${body.includes("<form") ? `<button type="button" class="btn btn-small btn-quiet" data-open-wizard>${icon("help")} Como preencher</button>` : ""}<button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div></div>${body}</section></div>`;
-}
-
-function renderInviteCredentials(email, password, mode = "invite") {
-  const root = document.querySelector("#overlay-root");
-  if (!root) return;
-  if (mode === "invite") {
-    root.innerHTML = `<div class="dialog-backdrop"><section class="dialog invite-success" role="dialog" aria-modal="true" aria-labelledby="invite-success-title">
-      <div class="dialog-head"><div><span class="eyebrow">Acesso criado</span><h2 id="invite-success-title">Convite enviado por e-mail</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
-      <div class="success-symbol">${icon("mail")}</div>
-      <p>O convite de <strong>${escapeHtml(email)}</strong> foi enviado. A pessoa deve abrir o link recebido, confirmar o e-mail e criar a prÃ³pria senha no primeiro acesso.</p>
-      <div class="dialog-instructions">Se o convite expirar ou jÃ¡ tiver sido usado sem concluir o acesso, use a opÃ§Ã£o â€œReenviar confirmaÃ§Ã£oâ€ na tela de entrada.</div>
-      <button class="btn btn-primary btn-block" data-close-dialog>Concluir</button>
-    </section></div>`;
-    return;
-  }
-  root.innerHTML = `<div class="dialog-backdrop"><section class="dialog invite-success" role="dialog" aria-modal="true" aria-labelledby="invite-success-title">
-    <div class="dialog-head"><div><span class="eyebrow">${mode === "invite" ? "Acesso criado" : "Credencial alterada"}</span><h2 id="invite-success-title">${mode === "invite" ? "Convite enviado por e-mail" : "Nova senha definida"}</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
-    <div class="success-symbol">${icon("mail")}</div>
-    <p>${mode === "invite" ? `O acesso de <strong>${escapeHtml(email)}</strong> foi criado.` : `A senha de <strong>${escapeHtml(email)}</strong> foi atualizada.`} Guarde a senha abaixo: ela nÃ£o serÃ¡ mostrada novamente.</p>
-    <div class="credential-box"><div><small>Senha inicial</small><code>${escapeHtml(password)}</code></div><button class="btn btn-secondary btn-small" data-copy-password="${escapeHtml(password)}">${icon("copy")} Copiar senha</button></div>
-    <div class="dialog-instructions">${mode === "invite" ? "A pessoa tambÃ©m recebeu um convite para confirmar o e-mail e poderÃ¡ definir uma nova senha pelo link." : "Envie esta senha de forma segura. A pessoa tambÃ©m pode usar a recuperaÃ§Ã£o por e-mail para trocÃ¡-la."}</div>
-    <button class="btn btn-primary btn-block" data-close-dialog>Concluir</button>
-  </section></div>`;
-}
-
-function renderImportResults(result) {
-  const root = document.querySelector("#overlay-root");
-  if (!root) return;
-  const rows = result.results || [];
-  const success = rows.filter((item) => item.ok);
-  const failed = rows.filter((item) => !item.ok);
-  const credentials = success.filter((item) => item.temporaryPassword);
-  state.importResults = credentials;
-  root.innerHTML = `<div class="dialog-backdrop"><section class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="import-result-title">
-    <div class="dialog-head"><div><span class="eyebrow">ImportaÃ§Ã£o concluÃ­da</span><h2 id="import-result-title">${success.length} pessoas processadas</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
-    <section class="history-metrics"><div><strong>${success.filter((item) => item.type === "invited").length}</strong><small>Novos convites</small></div><div><strong>${success.filter((item) => item.type === "updated").length}</strong><small>Perfis atualizados</small></div><div><strong>${failed.length}</strong><small>Falhas</small></div><div><strong>${result.historyRestored || 0}</strong><small>Registros restaurados</small></div></section>
-    ${credentials.length ? `<div class="notice">Foram geradas ${credentials.length} senhas temporÃ¡rias. Baixe o arquivo agora; elas nÃ£o serÃ£o exibidas novamente.</div><button class="btn btn-secondary" data-download-import-passwords>${icon("download")} Baixar senhas temporÃ¡rias</button>` : ""}
-    <div class="import-result-list">${rows.map((item) => `<article class="${item.ok ? "import-ok" : "import-failed"}"><span>${item.ok ? icon("check") : "!"}</span><div><strong>${escapeHtml(item.email || "Registro sem e-mail")}</strong><small>${item.ok ? item.type === "invited" ? "Convite enviado" : "Perfil atualizado" : escapeHtml(item.message || "NÃ£o foi possÃ­vel importar")}</small></div></article>`).join("")}</div>
-    ${result.historyFailed ? `<p class="form-error">${result.historyFailed} registros de histÃ³rico nÃ£o puderam ser restaurados, normalmente porque o curso, a aula ou a atividade nÃ£o existe mais.</p>` : ""}
-    <button class="btn btn-primary btn-block" data-close-dialog>Concluir</button>
-  </section></div>`;
-}
-
-function downloadTextFile(filename, content, type = "application/json;charset=utf-8") {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function csvCell(value) {
-  const text = String(value ?? "");
-  return /[;"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-function parseCsv(text) {
-  const firstLine = String(text || "").split(/\r?\n/, 1)[0] || "";
-  const delimiter = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ";" : ",";
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let quoted = false;
-  const source = String(text || "").replace(/^\uFEFF/, "");
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    if (character === '"') {
-      if (quoted && source[index + 1] === '"') {
-        cell += '"';
-        index += 1;
-      } else quoted = !quoted;
-    } else if (character === delimiter && !quoted) {
-      row.push(cell.trim());
-      cell = "";
-    } else if ((character === "\n" || character === "\r") && !quoted) {
-      if (character === "\r" && source[index + 1] === "\n") index += 1;
-      row.push(cell.trim());
-      if (row.some(Boolean)) rows.push(row);
-      row = [];
-      cell = "";
-    } else cell += character;
-  }
-  row.push(cell.trim());
-  if (row.some(Boolean)) rows.push(row);
-  if (rows.length < 2) return [];
-  const headers = rows.shift().map((header) => header.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "_"));
-  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ""])));
-}
-
-function normalizeImportedRole(value) {
-  const role = String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  if (["cafcm_admin", "cafcm", "equipe cafcm", "administrador"].includes(role)) return "cafcm_admin";
-  if (["company", "empresa", "representante", "representante de empresa"].includes(role)) return "company";
-  if (["apprentice", "aprendiz", "jovem", "jovem aprendiz"].includes(role)) return "apprentice";
-  return role;
-}
-
-function normalizeImportedDepartment(value) {
-  const department = String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  const aliases = {
-    management: "management", direcao: "management", administracao: "management", "direcao e administracao": "management",
-    vacancies: "vacancies", vagas: "vacancies", "gestao de vagas": "vacancies",
-    coordination: "coordination", coordenacao: "coordination",
-    personnel: "personnel", "departamento pessoal": "personnel", dp: "personnel",
-    hr: "hr", rh: "hr", "recursos humanos": "hr",
-    finance: "finance", financeiro: "finance",
-  };
-  return aliases[department] || department || null;
-}
-
-async function fetchAllRows(table, columns, orderColumn = null) {
-  const rows = [];
-  for (let page = 0; page < 50; page += 1) {
-    let query = supabase.from(table).select(columns).range(page * 1000, page * 1000 + 999);
-    if (orderColumn) query = query.order(orderColumn);
-    const { data, error } = await query;
-    if (error) throw error;
-    rows.push(...(data || []));
-    if (!data || data.length < 1000) break;
-  }
-  return rows;
-}
-
-async function exportPeopleBackup() {
-  const [enrollments, progress, attempts, responses, audit, companies, courses, lessons, activities] = await Promise.all([
-    fetchAllRows("enrollments", "course_id,apprentice_id,assigned_at"),
-    fetchAllRows("lesson_progress", "lesson_id,apprentice_id,completed_at"),
-    fetchAllRows("activity_attempts", "activity_id,apprentice_id,status,submitted_at,reviewed_at"),
-    fetchAllRows("activity_responses", "activity_id,apprentice_id,response_text,updated_at"),
-    fetchAllRows("audit_logs", "actor_id,subject_user_id,action,entity_type,entity_id,details,occurred_at", "occurred_at"),
-    fetchAllRows("companies", "id,name,cnpj"),
-    fetchAllRows("courses", "id,title,status"),
-    fetchAllRows("lessons", "id,course_id,title,position"),
-    fetchAllRows("activities", "id,course_id,lesson_id,title,position"),
-  ]);
-  const people = state.people.length ? state.people : (await callAdmin({ action: "list_users" }, true)).users || [];
-  const personMap = new Map(people.map((person) => [person.id, person]));
-  const identity = (userId) => ({ email: personMap.get(userId)?.email || "", sourceId: userId });
-  const backup = {
-    format: "portal-cafcm-people-backup",
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    people: people.map((person) => ({
-      sourceId: person.id,
-      fullName: person.fullName,
-      email: person.email,
-      role: person.role,
-      department: person.department || null,
-      companyId: person.companyId,
-      isActive: person.isActive,
-      createdAt: person.createdAt,
-      emailConfirmedAt: person.emailConfirmedAt,
-      lastSignInAt: person.lastSignInAt,
-    })),
-    history: {
-      enrollments: (enrollments || []).map((item) => ({ ...identity(item.apprentice_id), courseId: item.course_id, assignedAt: item.assigned_at })),
-      lessonProgress: (progress || []).map((item) => ({ ...identity(item.apprentice_id), lessonId: item.lesson_id, completedAt: item.completed_at })),
-      activityAttempts: (attempts || []).map((item) => ({ ...identity(item.apprentice_id), activityId: item.activity_id, status: item.status, submittedAt: item.submitted_at, reviewedAt: item.reviewed_at })),
-      activityResponses: (responses || []).map((item) => ({ ...identity(item.apprentice_id), activityId: item.activity_id, responseText: item.response_text, updatedAt: item.updated_at })),
-    },
-    audit: audit || [],
-    catalog: { companies: companies || [], courses: courses || [], lessons: lessons || [], activities: activities || [] },
-  };
-  downloadTextFile(`portal-cafcm-pessoas-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(backup, null, 2));
-}
-
-function closeOverlay() {
-  pageTour.stop("dialog", false);
-  const root = document.querySelector("#overlay-root");
-  if (root) root.innerHTML = "";
-}
-
-async function navigate(view) {
-  if (!canAccessView(view, state.profile)) {
-    showToast("Seu departamento nÃ£o possui acesso a esta Ã¡rea.", "error");
-    return;
-  }
-  state.view = view;
-  if (!["course-editor", "lesson-editor", "student-course"].includes(view)) state.selectedCourseId = null;
-  if (!["lesson-editor", "student-course"].includes(view)) state.selectedLessonId = null;
-  if (view !== "audit") state.auditPersonId = null;
-  await renderPortal();
-}
-
-async function movePipelineItem(itemId, stageId) {
-  const [{ data: item, error: itemError }, { data: stage, error: stageError }] = await Promise.all([
-    supabase.from("pipeline_items").select("id,pipeline_id,stage_id,title").eq("id", itemId).single(),
-    supabase.from("pipeline_stages").select("id,pipeline_id,name").eq("id", stageId).single(),
-  ]);
-  if (itemError || stageError) throw itemError || stageError;
-  if (item.pipeline_id !== stage.pipeline_id) throw new Error("A etapa selecionada nÃ£o pertence Ã  esteira deste processo.");
-  if (item.stage_id === stage.id) return false;
-  const { data: lastItems, error: positionError } = await supabase
-    .from("pipeline_items")
-    .select("position")
-    .eq("pipeline_id", item.pipeline_id)
-    .eq("stage_id", stage.id)
-    .eq("is_archived", false)
-    .order("position", { ascending: false })
-    .limit(1);
-  if (positionError) throw positionError;
-  const position = (lastItems?.[0]?.position || 0) + 1000;
-  const { error } = await supabase.from("pipeline_items").update({ stage_id: stage.id, position }).eq("id", item.id);
-  if (error) throw error;
-  showToast(`Processo movido para ${stage.name}.`);
-  await renderView();
-  return true;
-}
-
-window.addEventListener("popstate", () => {
-  if (state.session && state.profile) {
-    resolveRoute(state);
-    renderPortal();
-  }
-});
-
-window.addEventListener("routeChange", () => {
-  if (state.session && state.profile) {
-    resolveRoute(state);
-    renderPortal();
-  }
-});
-
-app.addEventListener("click", async (event) => {
-  const navLink = event.target.closest("a.nav-item");
-  if (navLink) {
-    event.preventDefault();
-    const navId = navLink.getAttribute("data-nav");
-    pushView(navId);
-    app.querySelector(".portal-shell")?.classList.remove("menu-open");
-    return;
-  }
-
-  const groupToggle = event.target.closest(".nav-label-btn");
-  if (groupToggle) {
-    const group = groupToggle.closest(".nav-group");
-    group.classList.toggle("expanded");
-    const isExpanded = group.classList.contains("expanded");
-    groupToggle.setAttribute("aria-expanded", isExpanded);
-    return;
-  }
-
-  const sidebarToggle = event.target.closest(".sidebar-toggle");
-  if (sidebarToggle) {
-    const isCompact = localStorage.getItem("sidebarCompact") === "true";
-    localStorage.setItem("sidebarCompact", !isCompact);
-    renderPortal();
-    return;
-  }
-  const target = event.target.closest("button, [data-nav]");
-  if (!target) return;
-
-  if (target.hasAttribute("data-nav") && !target.closest(".sidebar")) {
-    event.preventDefault();
-    pushView(target.getAttribute("data-nav"));
-    return;
-  }
-
-  if (target.dataset.authMode) return renderLogin(target.dataset.authMode);
-  if (target.hasAttribute("data-open-menu")) return document.querySelector(".portal-shell")?.classList.add("menu-open");
-  if (target.hasAttribute("data-close-menu")) return document.querySelector(".portal-shell")?.classList.remove("menu-open");
-  if (target.dataset.vacancyTab) {
-    state.vacancyTab = target.dataset.vacancyTab;
-    state.vacancyStatus = "";
-    if (state.vacancyTab === "candidates") pushRoute("/vagas/candidatos");
-    else if (state.vacancyTab === "processes") pushRoute("/vagas/processos-seletivos");
-    else pushRoute("/vagas");
-    return;
-  }
-  if (target.dataset.documentTab) {
-    state.documentTab = target.dataset.documentTab;
-    if (state.documentTab === "templates") pushRoute("/documentos/modelos");
-    else pushRoute("/documentos");
-    return;
-  }
-  if (target.dataset.notificationFilter) {
-    state.notificationFilter = target.dataset.notificationFilter;
-    // not routed currently
-    return renderView();
-  }
-  if (target.dataset.automationTab) {
-    state.automationTab = target.dataset.automationTab;
-    if (state.automationTab === "history") pushRoute("/automacoes/historico");
-    else pushRoute("/automacoes");
-    return;
-  }
-  if (target.dataset.financeTab) {
-    state.financeTab = target.dataset.financeTab;
-    if (state.financeTab === "receivable") pushRoute("/faturamento");
-    else if (state.financeTab === "payable") pushRoute("/despesas");
-    else if (state.financeTab === "billets") pushRoute("/boletos");
-    else pushRoute("/financeiro");
-    return;
-  }
-  if (target.dataset.financeMonthShift) {
-    state.financeMonth = shiftFinanceMonth(state.financeMonth, Number(target.dataset.financeMonthShift));
-    return renderView();
-  }
-  if (target.hasAttribute("data-finance-month-today")) {
-    state.financeMonth = new Date().toISOString().slice(0, 7);
-    return renderView();
-  }
-  if (target.hasAttribute("data-export-indicators")) {
-    try {
-      const { data, error } = await supabase.rpc("get_portal_indicators", { period_start_value: state.indicatorStart, period_end_value: state.indicatorEnd });
-      if (error) throw error;
-      downloadTextFile(`indicadores-cafcm-${state.indicatorStart}-${state.indicatorEnd}.csv`, csvForIndicators(data), "text/csv;charset=utf-8");
-      await callAdmin({ action: "log_event", event: "reports.exported", entityId: `${state.indicatorStart}:${state.indicatorEnd}` }, true).catch(() => {});
-      return showToast("RelatÃ³rio exportado em CSV e registrado na auditoria.");
-    } catch (error) { return showToast(friendlyError(error), "error"); }
-  }
-  if (target.dataset.workLogAction) {
-    const { data: log, error: logError } = await supabase.from("work_activity_logs").select("*").eq("id", target.dataset.workLogId).single();
-    if (logError) return showToast(friendlyError(logError), "error");
-    const now = new Date().toISOString();
-    const elapsed = log.status === "running" && log.active_started_at ? Math.max(0, Math.floor((Date.now() - new Date(log.active_started_at).getTime()) / 1000)) : 0;
-    const complete = target.dataset.workLogAction === "complete";
-    const { error } = await supabase.from("work_activity_logs").update({
-      status: complete ? "completed" : "paused",
-      active_started_at: null,
-      ended_at: complete ? now : null,
-      accumulated_seconds: Number(log.accumulated_seconds || 0) + elapsed,
-    }).eq("id", log.id);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast(complete ? "Registro concluÃ­do." : "CronÃ´metro pausado.");
-    return renderView();
-  }
-  if (target.dataset.deleteIndicatorTarget) {
-    if (!window.confirm("Excluir esta meta? Nenhum dado real serÃ¡ removido.")) return;
-    const { error } = await supabase.from("indicator_targets").delete().eq("id", target.dataset.deleteIndicatorTarget);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast("Meta removida.");
-    return renderView();
-  }
-  if (target.dataset.editPayable) return openDialog("payable", target.dataset.editPayable);
-  if (target.dataset.openProcedurePipeline) {
-    state.selectedPipelineId = target.dataset.openProcedurePipeline;
-    return navigate("pipelines");
-  }
-  if (target.dataset.nav) return navigate(target.dataset.nav);
-  if (target.hasAttribute("data-reload")) return renderPortal();
-  if (target.hasAttribute("data-logout")) {
-    await callAdmin({ action: "log_event", event: "session.ended" }, true).catch(() => {});
-    await supabase.auth.signOut();
-    state.sessionLogged = false;
-    history.replaceState({}, "", location.pathname);
-    return renderLogin();
-  }
-  if (target.hasAttribute("data-open-wizard")) return renderWizard();
-  if (target.dataset.guideForm) {
-    const form = document.getElementById(target.dataset.guideForm);
-    if (!form || !form.closest("#main-content")) return;
-    const guide = buildFormGuide(form, form.closest(".card")?.querySelector("h2")?.textContent || "Preenchimento");
-    if (guide) state.wizardOpen = pageTour.start(guide);
-    return;
-  }
-  if (target.dataset.dialog) return openDialog(target.dataset.dialog);
-  if (target.dataset.taskFilter) {
-    state.taskFilter = target.dataset.taskFilter;
-    return renderView();
-  }
-  if (target.hasAttribute("data-clear-pipeline-filters")) {
-    state.pipelineSearch = "";
-    state.pipelinePriority = "";
-    state.pipelineResponsible = "";
-    state.pipelineCompany = "";
-    state.pipelineSort = "recent";
-    return renderView();
-  }
-  if (target.hasAttribute("data-clear-vacancy-filters")) {
-    state.vacancySearch = "";
-    state.vacancyStatus = "";
-    state.vacancyCompany = "";
-    return renderView();
-  }
-  if (target.hasAttribute("data-clear-finance-filters")) {
-    state.financeSearch = "";
-    state.financeStatus = "";
-    state.financeCompany = "";
-    return renderView();
-  }
-  if (target.hasAttribute("data-clear-payable-filters")) {
-    state.financeSearch = "";
-    state.payableStatus = "";
-    return renderView();
-  }
-  if (target.hasAttribute("data-clear-document-filters")) {
-    state.documentSearch = "";
-    state.documentCategory = "";
-    return renderView();
-  }
-  if (target.dataset.editPipelineItem) return openDialog("pipeline-item", target.dataset.editPipelineItem);
-  if (target.dataset.editAdmission) return openDialog("admission", target.dataset.editAdmission);
-  if (target.dataset.editContract) return openDialog("contract", target.dataset.editContract);
-  if (target.dataset.editLeave) return openDialog("leave", target.dataset.editLeave);
-  if (target.dataset.editTermination) return openDialog("termination", target.dataset.editTermination);
-  if (target.dataset.editAccounting) return openDialog("accounting", target.dataset.editAccounting);
-  if (target.dataset.editFinancialCharge) return openDialog("financial-charge", target.dataset.editFinancialCharge);
-  if (target.dataset.editDocument) return openDialog("document-edit", target.dataset.editDocument);
-  if (target.dataset.editDocumentRequirement) return openDialog("document-requirement", target.dataset.editDocumentRequirement);
-  if (target.dataset.editBankingIntegration) return openDialog("banking-integration", target.dataset.editBankingIntegration);
-  if (target.dataset.editEmailDraft) return openDialog("email-draft", target.dataset.editEmailDraft);
-  if (target.hasAttribute("data-run-automations")) {
-    target.disabled = true;
-    try {
-      const { data, error } = await supabase.rpc("run_portal_automations");
-      if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || "A atualizaÃ§Ã£o nÃ£o foi concluÃ­da.");
-      showToast(`AtualizaÃ§Ã£o concluÃ­da: ${data.alerts_active} alerta(s) ativo(s).`);
-      return renderView();
-    } catch (error) {
-      showToast(friendlyError(error), "error");
-    } finally {
-      if (target.isConnected) target.disabled = false;
-    }
-    return;
-  }
-  if (target.dataset.sendEmail) {
-    if (!window.confirm("VocÃª conferiu o destinatÃ¡rio, o assunto, o conteÃºdo e o anexo deste e-mail?")) return;
-    target.disabled = true;
-    try {
-      await callAutomation({ action: "send_email", deliveryId: target.dataset.sendEmail });
-      showToast("E-mail enviado e registrado.");
-      return renderView();
-    } catch (error) {
-      showToast(friendlyError(error), "error");
-    } finally {
-      if (target.isConnected) target.disabled = false;
-    }
-    return;
-  }
-  if (target.dataset.reviewGeneration) {
-    const status = target.dataset.reviewStatus;
-    const question = status === "approved" ? "Aprovar este documento apÃ³s a conferÃªncia?" : "Rejeitar esta versÃ£o do documento?";
-    if (!window.confirm(question)) return;
-    const { error } = await supabase.from("document_generations").update({ status, reviewed_by: state.profile.id, reviewed_at: new Date().toISOString() }).eq("id", target.dataset.reviewGeneration).eq("status", "draft");
-    if (error) return showToast(friendlyError(error), "error");
-    showToast(status === "approved" ? "Documento aprovado." : "VersÃ£o rejeitada e preservada no histÃ³rico.");
-    return renderView();
-  }
-  if (target.dataset.archiveDocument) {
-    const archived = target.dataset.documentArchived === "true";
-    if (!archived && !window.confirm("Arquivar este documento? O arquivo e o histÃ³rico serÃ£o preservados.")) return;
-    const { error } = await supabase.from("document_records").update({ is_archived: !archived, archived_at: archived ? null : new Date().toISOString() }).eq("id", target.dataset.archiveDocument);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast(archived ? "Documento restaurado." : "Documento arquivado com o histÃ³rico preservado.");
-    return renderView();
-  }
-  if (target.dataset.downloadDocument) {
-    const { data, error } = await supabase.from("document_records").select("storage_path").eq("id", target.dataset.downloadDocument).single();
-    if (error) return showToast(friendlyError(error), "error");
-    const { data: signed, error: signedError } = await supabase.storage.from("cafcm-documents").createSignedUrl(data.storage_path, 60);
-    if (signedError) return showToast(friendlyError(signedError), "error");
-    window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
-    return;
-  }
-  if (target.dataset.archivePipelineItem) {
-    if (!window.confirm(`Arquivar o processo â€œ${target.dataset.processTitle}â€? O histÃ³rico de movimentaÃ§Ãµes e auditoria serÃ¡ preservado.`)) return;
-    const { error } = await supabase.from("pipeline_items").update({ is_archived: true, archived_at: new Date().toISOString() }).eq("id", target.dataset.archivePipelineItem);
-    if (error) return showToast(friendlyError(error), "error");
-    closeOverlay();
-    showToast("Processo arquivado com o histÃ³rico preservado.");
-    return renderView();
-  }
-  if (target.dataset.editTask) return openDialog("task", target.dataset.editTask);
-  if (target.dataset.taskStatus) {
-    const { error } = await supabase.from("tasks").update({ status: target.dataset.nextStatus }).eq("id", target.dataset.taskStatus);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast(target.dataset.nextStatus === "completed" ? "Tarefa concluÃ­da." : "Tarefa reaberta.");
-    return renderView();
-  }
-  if (target.dataset.toggleChecklist) {
-    const complete = target.dataset.checklistComplete !== "true";
-    const { error } = await supabase.from("task_checklist_items").update({ is_completed: complete }).eq("id", target.dataset.toggleChecklist);
-    if (error) return showToast(friendlyError(error), "error");
-    return renderView();
-  }
-  if (target.dataset.readNotification) {
-    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("id", target.dataset.readNotification);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast("NotificaÃ§Ã£o marcada como lida.");
-    return renderPortal();
-  }
-  if (target.dataset.dismissNotification) {
-    const now = new Date().toISOString();
-    const { error } = await supabase.from("notifications").update({ status: "dismissed", resolved_at: now, is_read: true, read_at: now }).eq("id", target.dataset.dismissNotification);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast("NotificaÃ§Ã£o dispensada. O alerta de origem continua no histÃ³rico.");
-    return renderPortal();
-  }
-  if (target.hasAttribute("data-read-all-notifications")) {
-    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("recipient_id", state.profile.id).eq("status", "open").eq("is_read", false);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast("Todas as notificaÃ§Ãµes foram marcadas como lidas.");
-    return renderPortal();
-  }
-  if (target.dataset.openNotification) {
-    const { error } = await supabase.from("notifications").update({ is_read: true, read_at: new Date().toISOString() }).eq("id", target.dataset.openNotification);
-    if (error) return showToast(friendlyError(error), "error");
-    return navigate(target.dataset.notificationTarget || "notifications");
-  }
-  if (target.dataset.editCompany) return openDialog("company", target.dataset.editCompany);
-  if (target.dataset.editCandidate) return openDialog("candidate", target.dataset.editCandidate);
-  if (target.dataset.editVacancy) return openDialog("vacancy", target.dataset.editVacancy);
-  if (target.dataset.editApplication) return openDialog("application", target.dataset.editApplication);
-  if (target.dataset.editPartnership) return openDialog("partnership", target.dataset.editPartnership);
-  if (target.dataset.convertCandidate) return openDialog("candidate-conversion", target.dataset.convertCandidate);
-  if (target.dataset.downloadCandidateDocument) {
-    const { data, error } = await supabase.from("candidate_documents").select("storage_path").eq("id", target.dataset.downloadCandidateDocument).single();
-    if (error) return showToast(friendlyError(error), "error");
-    const { data: signed, error: signedError } = await supabase.storage.from("cafcm-recruitment").createSignedUrl(data.storage_path, 60);
-    if (signedError) return showToast(friendlyError(signedError), "error");
-    window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
-    return;
-  }
-  if (target.dataset.archiveCandidate) {
-    const archived = target.dataset.candidateArchived === "true";
-    const { error } = await supabase.from("candidates").update({ status: archived ? "new" : "archived", archived_at: archived ? null : new Date().toISOString() }).eq("id", target.dataset.archiveCandidate);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast(archived ? "Candidato reativado." : "Candidato arquivado com o histÃ³rico preservado.");
-    return renderView();
-  }
-  if (target.dataset.editPerson) return openDialog("person", target.dataset.editPerson);
-  if (target.dataset.personHistory) return openDialog("person-history", target.dataset.personHistory);
-  if (target.dataset.editCourse) return openDialog("course", target.dataset.editCourse);
-  if (target.dataset.editLesson) return openDialog("lesson", target.dataset.editLesson);
-  if (target.dataset.editBlock) return openDialog("block", target.dataset.editBlock);
-  if (target.dataset.editActivity) return openDialog("activity", target.dataset.editActivity);
-  if (target.hasAttribute("data-return-course-editor")) {
-    state.selectedLessonId = null;
-    return navigate("course-editor");
-  }
-  if (target.dataset.openLessonEditor) {
-    state.selectedLessonId = target.dataset.openLessonEditor;
-    return navigate("lesson-editor");
-  }
-  if (target.dataset.viewPersonAudit) {
-    state.auditPersonId = target.dataset.viewPersonAudit;
-    closeOverlay();
-    state.view = "audit";
-    return renderPortal();
-  }
-  if (target.hasAttribute("data-clear-audit-filter")) {
-    state.auditPersonId = null;
-    return renderView();
-  }
-  if (target.hasAttribute("data-download-people-template")) {
-    return downloadTextFile("modelo-importacao-pessoas-cafcm.csv", "nome;email;perfil;empresa;departamento\n", "text/csv;charset=utf-8");
-  }
-  if (target.hasAttribute("data-export-people")) {
-    target.disabled = true;
-    try {
-      await exportPeopleBackup();
-      showToast("Backup de pessoas e histÃ³rico salvo.");
-    } catch (error) {
-      showToast(friendlyError(error), "error");
-    } finally {
-      if (target.isConnected) target.disabled = false;
-    }
-    return;
-  }
-  if (target.hasAttribute("data-download-import-passwords")) {
-    const rows = ["email;senha_temporaria", ...state.importResults.map((item) => `${csvCell(item.email)};${csvCell(item.temporaryPassword)}`)];
-    downloadTextFile(`senhas-temporarias-cafcm-${new Date().toISOString().slice(0, 10)}.csv`, `${rows.join("\n")}\n`, "text/csv;charset=utf-8");
-    return;
-  }
-  if (target.dataset.copyPassword) {
-    try {
-      await navigator.clipboard.writeText(target.dataset.copyPassword);
-      return showToast("Senha copiada.");
-    } catch {
-      return showToast("NÃ£o foi possÃ­vel copiar. Selecione a senha manualmente.", "error");
-    }
-  }
-  if (target.dataset.resendAccess) {
-    const pending = target.dataset.accessPending === "true";
-    const question = pending
-      ? "Reenviar o e-mail de confirmaÃ§Ã£o para esta pessoa?"
-      : "Enviar um e-mail para esta pessoa definir uma nova senha?";
-    if (!window.confirm(question)) return;
-    target.disabled = true;
-    try {
-      const result = await callAdmin({ action: "resend_access", userId: target.dataset.resendAccess }, true);
-      showToast(result.mode === "confirmation" ? "Convite reenviado." : "E-mail de recuperaÃ§Ã£o enviado.");
-    } catch (error) {
-      showToast(friendlyError(error), "error");
-    } finally {
-      if (target.isConnected) target.disabled = false;
-    }
-    return;
-  }
-  if (target.dataset.setPersonActive) {
-    const activate = target.dataset.personActive === "true";
-    const name = target.dataset.personName || "esta pessoa";
-    const question = activate
-      ? `Restaurar o acesso de ${name}?`
-      : `Excluir o acesso de ${name}? A pessoa serÃ¡ bloqueada imediatamente no prÃ³ximo carregamento, mas todo o histÃ³rico serÃ¡ arquivado e poderÃ¡ ser restaurado.`;
-    if (!window.confirm(question)) return;
-    target.disabled = true;
-    try {
-      await callAdmin({ action: "set_user_status", userId: target.dataset.setPersonActive, active: activate }, true);
-      showToast(activate ? "Acesso restaurado." : "Acesso excluÃ­do e histÃ³rico preservado.");
-      return renderView();
-    } catch (error) {
-      showToast(friendlyError(error), "error");
-    } finally {
-      if (target.isConnected) target.disabled = false;
-    }
-    return;
-  }
-  if (target.dataset.toggleCompany) {
-    const activate = target.dataset.companyActive !== "true";
-    const { error } = await supabase.from("companies").update({
-      is_active: activate,
-      inactivated_at: activate ? null : new Date().toISOString(),
-    }).eq("id", target.dataset.toggleCompany);
-    if (error) return showToast(error.message, "error");
-    showToast(activate ? "Empresa reativada." : "Empresa marcada como inativa.");
-    return renderView();
-  }
-  if (target.dataset.deleteCompany) {
-    const { count, error: countError } = await supabase.from("profiles").select("*", { count: "exact", head: true }).eq("company_id", target.dataset.deleteCompany);
-    if (countError) return showToast(countError.message, "error");
-    if (count) return showToast("Esta empresa possui pessoas vinculadas. Inative-a ou remova os vÃ­nculos antes de excluir.", "error");
-    if (!window.confirm(`Excluir a empresa â€œ${target.dataset.companyName}â€? Esta aÃ§Ã£o nÃ£o pode ser desfeita.`)) return;
-    const { error } = await supabase.from("companies").delete().eq("id", target.dataset.deleteCompany);
-    if (error) return showToast(error.code === "23503" ? "A empresa ainda possui vÃ­nculos e nÃ£o pode ser excluÃ­da." : error.message, "error");
-    showToast("Empresa excluÃ­da.");
-    return renderView();
-  }
-  if (target.dataset.archiveCourse) {
-    const archived = target.dataset.courseStatus === "archived";
-    const { error } = await supabase.from("courses").update({
-      status: archived ? "draft" : "archived",
-      published_at: null,
-    }).eq("id", target.dataset.archiveCourse);
-    if (error) return showToast(error.message, "error");
-    showToast(archived ? "Curso reaberto como rascunho." : "Curso arquivado.");
-    return renderView();
-  }
-  if (target.dataset.deleteCourse) {
-    const { count, error: countError } = await supabase.from("enrollments").select("*", { count: "exact", head: true }).eq("course_id", target.dataset.deleteCourse);
-    if (countError) return showToast(countError.message, "error");
-    if (count) return showToast("Este curso possui matrÃ­culas. Arquive-o para preservar o histÃ³rico.", "error");
-    if (!window.confirm(`Excluir o curso â€œ${target.dataset.courseTitle}â€ e todo o seu conteÃºdo?`)) return;
-    const { error } = await supabase.from("courses").delete().eq("id", target.dataset.deleteCourse);
-    if (error) return showToast(error.message, "error");
-    showToast("Curso excluÃ­do.");
-    return navigate("courses");
-  }
-  if (target.dataset.deleteLesson) {
-    const { count, error: countError } = await supabase.from("lesson_progress").select("lesson_id", { count: "exact", head: true }).eq("lesson_id", target.dataset.deleteLesson);
-    if (countError) return showToast(friendlyError(countError), "error");
-    if (count) return showToast("Esta aula possui conclusÃµes registradas. Mantenha-a para preservar o histÃ³rico dos jovens.", "error");
-    if (!window.confirm(`Excluir a aula â€œ${target.dataset.itemTitle}â€ e suas linhas de aprendizagem?`)) return;
-    const { error } = await supabase.from("lessons").delete().eq("id", target.dataset.deleteLesson);
-    if (error) return showToast(error.message, "error");
-    showToast("Aula excluÃ­da.");
-    return renderView();
-  }
-  if (target.dataset.deleteBlock) {
-    const { count, error: countError } = await supabase.from("lesson_progress").select("lesson_id", { count: "exact", head: true }).eq("lesson_id", state.selectedLessonId);
-    if (countError) return showToast(friendlyError(countError), "error");
-    if (count) return showToast("HÃ¡ jovens que jÃ¡ concluÃ­ram esta aula. Altere a linha em vez de excluÃ­-la para preservar o histÃ³rico pedagÃ³gico.", "error");
-    if (!window.confirm(`Excluir a linha â€œ${target.dataset.itemTitle}â€?`)) return;
-    const { error } = await supabase.from("lesson_blocks").delete().eq("id", target.dataset.deleteBlock);
-    if (error) return showToast(friendlyError(error), "error");
-    showToast("Linha de aprendizagem excluÃ­da.");
-    return renderView();
-  }
-  if (target.dataset.moveBlock) {
-    const { data: blocks, error } = await supabase.from("lesson_blocks").select("id,position").eq("lesson_id", state.selectedLessonId).order("position");
-    if (error) return showToast(friendlyError(error), "error");
-    const index = (blocks || []).findIndex((block) => block.id === target.dataset.moveBlock);
-    const destination = index + (target.dataset.moveDirection === "up" ? -1 : 1);
-    if (index < 0 || destination < 0 || destination >= blocks.length) return;
-    const current = blocks[index];
-    const other = blocks[destination];
-    const temporaryPosition = 1000000 + current.position;
-    const first = await supabase.from("lesson_blocks").update({ position: temporaryPosition }).eq("id", current.id);
-    if (first.error) return showToast(friendlyError(first.error), "error");
-    const second = await supabase.from("lesson_blocks").update({ position: current.position }).eq("id", other.id);
-    if (second.error) {
-      await supabase.from("lesson_blocks").update({ position: current.position }).eq("id", current.id);
-      return showToast(friendlyError(second.error), "error");
-    }
-    const third = await supabase.from("lesson_blocks").update({ position: other.position }).eq("id", current.id);
-    if (third.error) return showToast(friendlyError(third.error), "error");
-    return renderView();
-  }
-  if (target.dataset.deleteActivity) {
-    const { count, error: countError } = await supabase.from("activity_attempts").select("activity_id", { count: "exact", head: true }).eq("activity_id", target.dataset.deleteActivity);
-    if (countError) return showToast(friendlyError(countError), "error");
-    if (count) return showToast("Esta atividade possui envios registrados. Mantenha-a para preservar o histÃ³rico dos jovens.", "error");
-    if (!window.confirm(`Excluir a atividade â€œ${target.dataset.itemTitle}â€?`)) return;
-    const { error } = await supabase.from("activities").delete().eq("id", target.dataset.deleteActivity);
-    if (error) return showToast(error.message, "error");
-    showToast("Atividade excluÃ­da.");
-    return renderView();
-  }
-  if (target.hasAttribute("data-close-dialog")) return closeOverlay();
-  if (target.dataset.openCourse) {
-    state.selectedCourseId = target.dataset.openCourse;
-    state.selectedLessonId = null;
-    state.lessonStepIndex = 0;
-    if (state.profile.role === "apprentice") callAdmin({ action: "log_event", event: "course.opened", entityId: state.selectedCourseId }, true).catch(() => {});
-    return navigate(state.profile.role === "cafcm_admin" ? "course-editor" : "student-course");
-  }
-  if (target.dataset.openLesson) {
-    state.selectedLessonId = target.dataset.openLesson;
-    state.lessonStepIndex = 0;
-    state.blockSlideIndex = 0;
-    callAdmin({ action: "log_event", event: "lesson.opened", entityId: state.selectedLessonId }, true).catch(() => {});
-    return renderView();
-  }
-  if (target.hasAttribute("data-return-student-course")) {
-    state.selectedLessonId = null;
-    state.lessonStepIndex = 0;
-    state.blockSlideIndex = 0;
-    return renderView();
-  }
-  if (target.dataset.lessonStep) {
-    state.lessonStepIndex = Math.max(0, state.lessonStepIndex + (target.dataset.lessonStep === "next" ? 1 : -1));
-    state.blockSlideIndex = 0;
-    return renderView();
-  }
-  if (target.dataset.blockSlide) {
-    state.blockSlideIndex = Math.max(0, state.blockSlideIndex + (target.dataset.blockSlide === "next" ? 1 : -1));
-    return renderView();
-  }
-  if (target.dataset.completeLesson) {
-    const { data: existing } = await supabase.from("lesson_progress").select("lesson_id").eq("lesson_id", target.dataset.completeLesson).eq("apprentice_id", state.profile.id).maybeSingle();
-    if (!existing) {
-      const { error } = await supabase.from("lesson_progress").upsert({ lesson_id: target.dataset.completeLesson, apprentice_id: state.profile.id });
-      if (error) return showToast(friendlyError(error), "error");
-      showToast("Aula concluÃ­da e progresso salvo.");
-    }
-    state.selectedLessonId = null;
-    state.lessonStepIndex = 0;
-    return renderView();
-  }
-  if (target.dataset.answerActivity) {
-    state.selectedActivityId = target.dataset.answerActivity;
-    return openDialog("response");
-  }
-  if (target.dataset.toggleLesson) {
-    const lessonId = target.dataset.toggleLesson;
-    const complete = target.dataset.complete === "true";
-    const query = complete
-      ? supabase.from("lesson_progress").delete().eq("lesson_id", lessonId).eq("apprentice_id", state.profile.id)
-      : supabase.from("lesson_progress").upsert({ lesson_id: lessonId, apprentice_id: state.profile.id });
-    const { error } = await query;
-    if (error) return showToast(error.message, "error");
-    showToast(complete ? "Aula marcada como nÃ£o concluÃ­da." : "Aula concluÃ­da.");
-    return renderView();
-  }
-  if (target.dataset.toggleCourseStatus) {
-    const next = target.dataset.currentStatus === "published" ? "draft" : "published";
-    if (next === "published") {
-      const [{ data: courseLessons, error: lessonError }, { data: course, error: courseError }] = await Promise.all([
-        supabase.from("lessons").select("id").eq("course_id", target.dataset.toggleCourseStatus),
-        supabase.from("courses").select("description,objectives,workload_hours").eq("id", target.dataset.toggleCourseStatus).single(),
-      ]);
-      if (courseError || lessonError) return showToast(friendlyError(courseError || lessonError), "error");
-      if (!courseLessons?.length) return showToast("Adicione ao menos uma aula antes de publicar.", "error");
-      const { data: blocks, error: blockError } = await supabase.from("lesson_blocks").select("lesson_id").in("lesson_id", courseLessons.map((lesson) => lesson.id));
-      if (blockError) return showToast(friendlyError(blockError), "error");
-      const structured = new Set((blocks || []).map((block) => block.lesson_id));
-      if (courseLessons.some((lesson) => !structured.has(lesson.id))) return showToast("Estruture todas as aulas com ao menos uma linha de aprendizagem antes de publicar.", "error");
-      if (!course.description?.trim() || !course.objectives?.trim() || Number(course.workload_hours) <= 0) {
-        return showToast("Preencha descriÃ§Ã£o, objetivos e carga horÃ¡ria antes de publicar.", "error");
-      }
-    }
-    const { error } = await supabase.from("courses").update({
-      status: next,
-      published_at: next === "published" ? new Date().toISOString() : null,
-    }).eq("id", target.dataset.toggleCourseStatus);
-    if (error) return showToast(error.message, "error");
-    showToast(next === "published" ? "Curso publicado." : "Curso voltou para rascunho.");
-    return renderView();
-  }
-  if (target.dataset.removeEnrollment) {
-    const confirmed = window.confirm("Remover esta matrÃ­cula? O progresso relacionado permanecerÃ¡ protegido, mas o jovem perderÃ¡ o acesso ao curso.");
-    if (!confirmed) return;
-    const { error } = await supabase.from("enrollments").delete().eq("course_id", target.dataset.removeEnrollment).eq("apprentice_id", target.dataset.apprentice);
-    if (error) return showToast(error.message, "error");
-    showToast("MatrÃ­cula removida.");
-    return renderView();
-  }
-});
-
-app.addEventListener("change", (event) => {
-  if (event.target.matches("[data-email-template]")) {
-    const option = event.target.selectedOptions?.[0];
-    const form = event.target.closest("form");
-    if (form && option) {
-      form.elements.subject.value = option.dataset.subject || "";
-      form.elements.body.value = option.dataset.body || "";
-    }
-    return;
-  }
-
-  if (event.target.matches("[data-pipeline-select]")) {
-    state.selectedPipelineId = event.target.value;
-    state.pipelineSearch = "";
-    state.pipelinePriority = "";
-    state.pipelineResponsible = "";
-    state.pipelineCompany = "";
-    state.pipelineSort = "recent";
-    return renderView();
-  }
-
-  if (event.target.matches("[data-pipeline-filter]")) {
-    const stateKeys = {
-      priority: "pipelinePriority",
-      responsible: "pipelineResponsible",
-      company: "pipelineCompany",
-      sort: "pipelineSort",
-    };
-    const stateKey = stateKeys[event.target.dataset.pipelineFilter];
-    if (stateKey) state[stateKey] = event.target.value;
-    return renderView();
-  }
-
-  if (event.target.matches("[data-vacancy-filter]")) {
-    const stateKey = event.target.dataset.vacancyFilter === "status" ? "vacancyStatus" : "vacancyCompany";
-    state[stateKey] = event.target.value;
-    return renderView();
-  }
-
-  if (event.target.matches("[data-finance-filter]")) {
-    const stateKey = event.target.dataset.financeFilter === "status" ? "financeStatus" : "financeCompany";
-    state[stateKey] = event.target.value;
-    return renderView();
-  }
-
-  if (event.target.matches("[data-payable-filter]")) {
-    state.payableStatus = event.target.value;
-    return renderView();
-  }
-
-  if (event.target.matches("[data-document-category]")) {
-    state.documentCategory = event.target.value;
-    return renderView();
-  }
-
-  if (event.target.matches("[data-move-process]")) {
-    const select = event.target;
-    select.disabled = true;
-    return movePipelineItem(select.dataset.moveProcess, select.value).catch((error) => {
-      showToast(friendlyError(error), "error");
-      return renderView();
-    });
-  }
-
-  if (event.target.name === "role") {
-    const companyField = document.querySelector(".company-field");
-    const departmentField = document.querySelector(".department-field");
-    const role = event.target.value;
-    const required = role === "company";
-    const hidden = role === "cafcm_admin";
-    if (companyField) {
-      companyField.hidden = hidden;
-      companyField.classList.toggle("required-field", required);
-      const select = companyField.querySelector("select");
-      if (select) {
-        select.required = required;
-        select.disabled = hidden;
-        if (hidden) select.value = "";
-      }
-    }
-    if (departmentField) {
-      const departmentSelect = departmentField.querySelector("select");
-      departmentField.hidden = !hidden;
-      if (departmentSelect) {
-        departmentSelect.required = hidden;
-        departmentSelect.disabled = !hidden;
-        if (hidden && !departmentSelect.value) departmentSelect.value = "management";
-      }
-    }
-    return;
-  }
-
-  if (event.target.name === "passwordMode") {
-    const passwordField = document.querySelector(".manual-password-field");
-    const input = passwordField?.querySelector("input");
-    const manual = event.target.value === "manual";
-    if (passwordField) passwordField.hidden = !manual;
-    if (input) {
-      input.disabled = !manual;
-      input.required = manual;
-      if (!manual) input.value = "";
-    }
-  }
-});
-
-app.addEventListener("input", (event) => {
-  if (event.target.matches("[data-pipeline-search]")) {
-    state.pipelineSearch = event.target.value;
-    window.clearTimeout(app.pipelineSearchTimer);
-    app.pipelineSearchTimer = window.setTimeout(() => renderView(), 250);
-    return;
-  }
-  if (event.target.matches("[data-vacancy-search]")) {
-    state.vacancySearch = event.target.value;
-    window.clearTimeout(app.vacancySearchTimer);
-    app.vacancySearchTimer = window.setTimeout(() => renderView(), 250);
-    return;
-  }
-  if (event.target.matches("[data-finance-search]")) {
-    state.financeSearch = event.target.value;
-    window.clearTimeout(app.financeSearchTimer);
-    app.financeSearchTimer = window.setTimeout(() => renderView(), 250);
-    return;
-  }
-  if (event.target.matches("[data-document-search]")) {
-    state.documentSearch = event.target.value;
-    window.clearTimeout(app.documentSearchTimer);
-    app.documentSearchTimer = window.setTimeout(() => renderView(), 250);
-  }
-});
-
-app.addEventListener("dragstart", (event) => {
-  const card = event.target.closest("[data-pipeline-item]");
-  if (!card) return;
-  state.draggedPipelineItemId = card.dataset.pipelineItem;
-  card.classList.add("dragging");
-  event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("text/plain", state.draggedPipelineItemId);
-});
-
-app.addEventListener("dragend", (event) => {
-  event.target.closest("[data-pipeline-item]")?.classList.remove("dragging");
-  document.querySelectorAll(".kanban-column.drag-over").forEach((column) => column.classList.remove("drag-over"));
-  state.draggedPipelineItemId = null;
-});
-
-app.addEventListener("dragover", (event) => {
-  const column = event.target.closest("[data-drop-stage]");
-  if (!column || !state.draggedPipelineItemId) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "move";
-  document.querySelectorAll(".kanban-column.drag-over").forEach((item) => item !== column && item.classList.remove("drag-over"));
-  column.classList.add("drag-over");
-});
-
-app.addEventListener("dragleave", (event) => {
-  const column = event.target.closest("[data-drop-stage]");
-  if (column && !column.contains(event.relatedTarget)) column.classList.remove("drag-over");
-});
-
-app.addEventListener("drop", async (event) => {
-  const column = event.target.closest("[data-drop-stage]");
-  if (!column) return;
-  event.preventDefault();
-  column.classList.remove("drag-over");
-  const itemId = event.dataTransfer.getData("text/plain") || state.draggedPipelineItemId;
-  if (!itemId) return;
-  try {
-    await movePipelineItem(itemId, column.dataset.dropStage);
-  } catch (error) {
-    showToast(friendlyError(error), "error");
-    await renderView();
-  }
-});
-
-app.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.target;
-  form.querySelector(".form-error")?.remove();
-  const values = Object.fromEntries(new FormData(form));
-  setBusy(form, true);
-
-  try {
-    if (form.id === "login-form") {
-      const { error } = await supabase.auth.signInWithPassword({ email: String(values.email).trim(), password: String(values.password) });
-      if (error) {
-        const message = String(error.message || "").toLowerCase();
-        if (message.includes("email not confirmed") || message.includes("not confirmed")) {
-          throw new Error("Este e-mail ainda precisa ser confirmado. Use â€œReenviar confirmaÃ§Ã£oâ€ e abra o novo link recebido.");
-        }
-        throw new Error("E-mail ou senha invÃ¡lidos.");
-      }
-      return await loadPortal();
-    }
-
-    if (form.id === "resend-form") {
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email: String(values.email).trim(),
-        options: { emailRedirectTo: SITE_ORIGIN },
-      });
-      if (error) throw error;
-      form.innerHTML = `<div class="form-success">${icon("mail")}<h2>Verifique seu e-mail</h2><p>Se o endereÃ§o estiver pendente de confirmaÃ§Ã£o, enviamos um novo link para concluir o acesso.</p></div>`;
-      return;
-    }
-
-    if (form.id === "recover-form") {
-      const { error } = await supabase.auth.resetPasswordForEmail(String(values.email).trim(), { redirectTo: SITE_ORIGIN });
-      if (error) throw error;
-      form.innerHTML = `<div class="form-success">${icon("mail")}<h2>Verifique seu e-mail</h2><p>Enviamos as instruÃ§Ãµes de recuperaÃ§Ã£o, caso o endereÃ§o esteja cadastrado.</p></div>`;
-      return;
-    }
-
-    if (form.id === "bootstrap-form") {
-      await callAdmin({ action: "bootstrap", fullName: values.fullName, email: values.email, password: values.password, code: values.code });
-      const { error } = await supabase.auth.signInWithPassword({ email: String(values.email).trim(), password: String(values.password) });
-      if (error) throw error;
-      history.replaceState({}, "", location.pathname);
-      return await loadPortal();
-    }
-
-    if (form.id === "password-form") {
-      if (values.password !== values.confirmation) throw new Error("As senhas nÃ£o coincidem.");
-      const { error } = await supabase.auth.updateUser({ password: String(values.password) });
-      if (error) throw error;
-      history.replaceState({}, "", location.pathname);
-      return await loadPortal();
-    }
-
-    if (form.id === "my-profile-form") {
-      const fullName = String(values.fullName || "").trim();
-      const password = String(values.password || "");
-      const confirmation = String(values.confirmation || "");
-      if (password !== confirmation) throw new Error("As novas senhas nÃ£o coincidem.");
-      if (password && password.length < 10) throw new Error("A nova senha deve ter pelo menos 10 caracteres.");
-      const authAttributes = { data: { ...(state.session?.user?.user_metadata || {}), full_name: fullName } };
-      if (password) authAttributes.password = password;
-      const { data: authData, error: authError } = await supabase.auth.updateUser(authAttributes);
-      if (authError) throw authError;
-      const { error: profileError } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", state.profile.id);
-      if (profileError) throw profileError;
-      state.profile.full_name = fullName;
-      if (authData?.user) state.session.user = authData.user;
-      if (password) await callAdmin({ action: "log_event", event: "profile.password_changed" }, true).catch(() => {});
-      closeOverlay();
-      await renderPortal();
-      showToast(password ? "Perfil e senha atualizados." : "Perfil atualizado.");
-      return;
-    }
-
-    if (form.id === "indicator-filter-form") {
-      if (values.start > values.end) throw new Error("A data inicial nÃ£o pode ser posterior Ã  data final.");
-      state.indicatorStart = String(values.start);
-      state.indicatorEnd = String(values.end);
-      state.indicatorGroup = String(values.group || "all");
-      return renderView();
-    }
-
-    if (form.id === "work-log-form") {
-      const manual = values.entryMode === "manual";
-      const taskId = String(values.taskId || "") || null;
-      const pipelineItemId = String(values.pipelineItemId || "") || null;
-      const minutes = Number(values.manualMinutes || 0);
-      if (manual && (!Number.isInteger(minutes) || minutes < 1 || minutes > 10080)) throw new Error("Informe entre 1 e 10.080 minutos para o lanÃ§amento manual.");
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("work_activity_logs").insert({
-        user_id: state.profile.id,
-        department: profileDepartment(),
-        task_id: taskId,
-        pipeline_item_id: pipelineItemId,
-        title: String(values.title || "").trim(),
-        category: String(values.category || "OperaÃ§Ãµes").trim(),
-        entry_mode: manual ? "manual" : "timer",
-        status: manual ? "completed" : "running",
-        started_at: now,
-        active_started_at: manual ? null : now,
-        ended_at: manual ? now : null,
-        manual_minutes: manual ? minutes : 0,
-        accumulated_seconds: manual ? minutes * 60 : 0,
-        notes: String(values.notes || "").trim(),
-      });
-      if (error) throw error;
-      showToast(manual ? "Tempo registrado." : "CronÃ´metro iniciado.");
-      return renderView();
-    }
-
-    if (form.id === "indicator-target-form") {
-      if (profileDepartment() !== "management") throw new Error("Somente a DireÃ§Ã£o e AdministraÃ§Ã£o pode definir metas.");
-      const targetValue = Number(values.targetValue);
-      if (!Number.isFinite(targetValue) || targetValue < 0) throw new Error("Informe um valor de meta vÃ¡lido.");
-      const { error } = await supabase.from("indicator_targets").upsert({
-        metric_key: String(values.metricKey),
-        label: String(values.label).trim(),
-        department: String(values.department || "all"),
-        period: String(values.period || "monthly"),
-        comparison: String(values.comparison || "minimum"),
-        target_value: targetValue,
-      }, { onConflict: "metric_key,department,period" });
-      if (error) throw error;
-      showToast("Meta salva sem alterar os dados do portal.");
-      return renderView();
-    }
-
-    if (form.id === "company-form") {
-      const cnpj = normalizeCnpj(values.cnpj);
-      const postalCode = digitsOnly(values.postalCode);
-      const stateCode = String(values.state || "").trim().toUpperCase();
-      if (cnpj && !isValidCnpj(cnpj)) throw new Error("Informe um CNPJ vÃ¡lido.");
-      if (postalCode && postalCode.length !== 8) throw new Error("Informe um CEP com 8 nÃºmeros.");
-      if (stateCode && stateCode.length !== 2) throw new Error("Informe a UF com duas letras.");
-      const payload = {
-        name: String(values.name).trim(),
-        legal_name: valueOrNull(values.legalName),
-        cnpj: cnpj || null,
-        email: valueOrNull(values.email)?.toLowerCase() || null,
-        phone: valueOrNull(values.phone),
-        contact_name: valueOrNull(values.contactName),
-        contact_role: valueOrNull(values.contactRole),
-        contact_email: valueOrNull(values.contactEmail)?.toLowerCase() || null,
-        contact_phone: valueOrNull(values.contactPhone),
-        postal_code: postalCode || null,
-        street: valueOrNull(values.street),
-        street_number: valueOrNull(values.streetNumber),
-        address_complement: valueOrNull(values.addressComplement),
-        district: valueOrNull(values.district),
-        city: valueOrNull(values.city),
-        state: stateCode || null,
-      };
-      const query = values.companyId
-        ? supabase.from("companies").update(payload).eq("id", values.companyId)
-        : supabase.from("companies").insert(payload);
-      const { error } = await query;
-      if (error) throw error;
-      closeOverlay();
-      showToast(values.companyId ? "Dados da empresa atualizados." : "Empresa cadastrada.");
-      return renderView();
-    }
-
-    if (form.id === "person-form") {
-      const result = await callAdmin({
-        action: "update_user",
-        userId: values.userId,
-        fullName: values.fullName,
-        email: values.email,
-        role: values.role,
-        department: values.role === "cafcm_admin" ? values.department || "management" : null,
-        companyId: values.role === "cafcm_admin" ? null : values.companyId || null,
-        passwordMode: values.passwordMode || "keep",
-        password: values.passwordMode === "manual" ? String(values.password || "") : null,
-      }, true);
-      await renderView();
-      if (result.temporaryPassword) {
-        renderInviteCredentials(String(values.email).trim().toLowerCase(), result.temporaryPassword, "reset");
-        return;
-      }
-      closeOverlay();
-      const message = result.needsInviteResend
-        ? "Dados salvos. Agora reenvie o convite para o novo e-mail."
-        : result.permissionsChanged
-          ? "Dados salvos. O novo perfil valerÃ¡ no prÃ³ximo acesso."
-          : "Dados da pessoa atualizados.";
-      showToast(message);
-      return;
-    }
-
-    if (form.id === "people-import-form") {
-      const file = values.peopleFile;
-      if (!(file instanceof File) || !file.size) throw new Error("Selecione um arquivo CSV ou JSON.");
-      if (file.size > 4 * 1024 * 1024) throw new Error("O arquivo deve ter no mÃ¡ximo 4 MB.");
-      const text = await file.text();
-      let people = [];
-      let importHistory = {};
-      if (file.name.toLowerCase().endsWith(".json") || file.type.includes("json")) {
-        if (profileDepartment() !== "management") throw new Error("A restauraÃ§Ã£o completa do histÃ³rico Ã© reservada Ã  DireÃ§Ã£o e AdministraÃ§Ã£o.");
-        let backup;
-        try {
-          backup = JSON.parse(text);
-        } catch {
-          throw new Error("O arquivo JSON nÃ£o Ã© vÃ¡lido.");
-        }
-        if (backup?.format !== "portal-cafcm-people-backup" || !Array.isArray(backup.people)) throw new Error("Este JSON nÃ£o Ã© um backup de pessoas do Portal CAFCM.");
-        people = backup.people;
-        importHistory = backup.history || {};
-      } else {
-        const rows = parseCsv(text);
-        if (!rows.length) throw new Error("O CSV estÃ¡ vazio ou nÃ£o possui linhas abaixo do cabeÃ§alho.");
-        const { data: companies, error } = await supabase.from("companies").select("id,name");
-        if (error) throw error;
-        const companyMap = new Map();
-        for (const company of companies || []) {
-          companyMap.set(company.id.toLowerCase(), company.id);
-          companyMap.set(company.name.toLowerCase().trim(), company.id);
-        }
-        people = rows.map((row) => {
-          const companyReference = String(row.empresa_id || row.empresa || row.company_id || "").trim();
-          return {
-            fullName: row.nome || row.nome_completo || row.full_name || row.fullname,
-            email: row.email,
-            role: normalizeImportedRole(row.perfil || row.tipo_de_acesso || row.role),
-            department: normalizeImportedDepartment(row.departamento || row.department || row.setor),
-            companyId: companyReference ? companyMap.get(companyReference.toLowerCase()) || companyReference : null,
-          };
-        });
-      }
-      if (people.length > 100) throw new Error("Divida o arquivo: cada importaÃ§Ã£o aceita atÃ© 100 pessoas.");
-      const result = await callAdmin({ action: "import_people", people, history: importHistory }, true);
-      await renderView();
-      renderImportResults(result);
-      return;
-    }
-
-    if (form.id === "candidate-form") {
-      const candidateId = String(values.candidateId || "");
-      const payload = {
-        full_name: String(values.fullName).trim(),
-        email: String(values.email || "").trim().toLowerCase() || null,
-        phone: String(values.phone || "").trim() || null,
-        cpf: digitsOnly(values.cpf) || null,
-        birth_date: values.birthDate || null,
-        education_level: String(values.educationLevel || "").trim(),
-        city: String(values.city || "").trim(),
-        neighborhood: String(values.neighborhood || "").trim(),
-        source: String(values.source || "").trim(),
-        status: values.status || "new",
-        archived_at: values.status === "archived" ? new Date().toISOString() : null,
-        notes: String(values.notes || "").trim(),
-      };
-      let savedId = candidateId;
-      if (candidateId) {
-        const { error } = await supabase.from("candidates").update(payload).eq("id", candidateId);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.from("candidates").insert({ ...payload, created_by: state.profile.id }).select("id").single();
-        if (error) throw error;
-        savedId = data.id;
-      }
-      const file = values.file;
-      if (file instanceof File && file.size) {
-        if (file.size > 25 * 1024 * 1024) throw new Error("O arquivo deve ter no mÃ¡ximo 25 MB.");
-        const cleanName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
-        const path = `${savedId}/${Date.now()}-${cleanName}`;
-        const { error: uploadError } = await supabase.storage.from("cafcm-recruitment").upload(path, file, { contentType: file.type, upsert: false });
-        if (uploadError) throw uploadError;
-        const { error: documentError } = await supabase.from("candidate_documents").insert({
-          candidate_id: savedId,
-          title: String(values.documentTitle || "").trim() || file.name.slice(0, 180),
-          category: values.documentCategory || "resume",
-          storage_path: path,
-          mime_type: file.type,
-          file_size: file.size,
-          uploaded_by: state.profile.id,
-        });
-        if (documentError) { await supabase.storage.from("cafcm-recruitment").remove([path]); throw documentError; }
-      }
-      closeOverlay(); showToast(candidateId ? "Candidato e histÃ³rico atualizados." : "Candidato cadastrado."); return renderView();
-    }
-    if (form.id === "vacancy-form") {
-      const vacancyId = String(values.vacancyId || "");
-      const status = values.status || "open";
-      const payload = { company_id: values.companyId, title: String(values.title).trim(), quantity: Number(values.quantity || 1), due_date: values.dueDate || null, workload: String(values.workload || "").trim(), work_model: String(values.workModel || "").trim(), location: String(values.location || "").trim(), monthly_salary: valueOrNull(values.monthlySalary), requirements: String(values.requirements || "").trim(), notes: String(values.notes || "").trim(), status, closed_at: ["filled", "cancelled"].includes(status) ? new Date().toISOString() : null };
-      const query = vacancyId ? supabase.from("job_vacancies").update(payload).eq("id", vacancyId) : supabase.from("job_vacancies").insert({ ...payload, created_by: state.profile.id });
-      const { error } = await query;
-      if (error) throw error; closeOverlay(); showToast(vacancyId ? "Vaga atualizada." : "Vaga aberta."); return renderView();
-    }
-    if (form.id === "application-form") {
-      const applicationId = String(values.applicationId || "");
-      const candidateId = values.candidateId || values.candidateIdSelect;
-      const vacancyId = values.vacancyId || values.vacancyIdSelect;
-      const payload = { candidate_id: candidateId, vacancy_id: vacancyId, status: values.status || "received", company_interview_at: values.companyInterviewAt ? new Date(String(values.companyInterviewAt)).toISOString() : null, notes: String(values.notes || "").trim(), company_feedback: String(values.companyFeedback || "").trim() };
-      const query = applicationId ? supabase.from("vacancy_applications").update(payload).eq("id", applicationId) : supabase.from("vacancy_applications").insert({ ...payload, created_by: state.profile.id });
-      const { error } = await query;
-      if (error?.code === "23505") throw new Error("Este candidato jÃ¡ estÃ¡ nesta vaga."); if (error) throw error; closeOverlay(); showToast(applicationId ? "Etapa da seleÃ§Ã£o atualizada." : "Candidato incluÃ­do no processo seletivo."); return renderView();
-    }
-    if (form.id === "partnership-form") {
-      const partnershipId = String(values.partnershipId || "");
-      if (values.startDate && values.endDate && new Date(`${values.endDate}T00:00:00`) < new Date(`${values.startDate}T00:00:00`)) throw new Error("A data de tÃ©rmino nÃ£o pode ser anterior ao inÃ­cio.");
-      const payload = { company_id: values.companyId, title: String(values.title || "Contrato de parceria").trim(), status: values.status || "active", start_date: values.startDate || null, end_date: values.endDate || null, notes: String(values.notes || "").trim() };
-      const query = partnershipId ? supabase.from("partnership_agreements").update(payload).eq("id", partnershipId) : supabase.from("partnership_agreements").insert({ ...payload, created_by: state.profile.id });
-      const { error } = await query;
-      if (error) throw error; closeOverlay(); showToast(partnershipId ? "Parceria atualizada." : "Parceria registrada."); return renderView();
-    }
-    if (form.id === "candidate-conversion-form") {
-      const result = await callAdmin({ action: "convert_candidate", applicationId: values.applicationId, targetStartDate: values.targetStartDate || null }, true);
-      closeOverlay();
-      showToast(result.alreadyConverted ? "A admissÃ£o deste jovem jÃ¡ estava aberta." : result.invited ? "Jovem criado, convite enviado e admissÃ£o aberta." : "Jovem vinculado e admissÃ£o aberta.");
-      state.view = canAccessView("admissions") ? "admissions" : "vacancies";
-      state.vacancyTab = "applications";
-      return renderPortal();
-    }
-
-    if (form.id === "pipeline-item-form") {
-      const processId = String(values.processId || "");
-      const pipelineId = String(values.pipelineId || "");
-      const stageId = String(values.stageId || "");
-      if (!pipelineId || !stageId) throw new Error("Selecione a esteira e a etapa do processo.");
-      const dueAt = values.dueAt ? new Date(String(values.dueAt)).toISOString() : null;
-      const payload = {
-        pipeline_id: pipelineId,
-        stage_id: stageId,
-        title: String(values.title || "").trim(),
-        description: String(values.description || "").trim(),
-        company_id: values.companyId || null,
-        apprentice_id: values.apprenticeId || null,
-        responsible_id: values.responsibleId || null,
-        priority: String(values.priority || "normal"),
-        due_at: dueAt,
-      };
-      let shouldReposition = !processId;
-      if (processId) {
-        const { data: current, error: currentError } = await supabase.from("pipeline_items").select("stage_id").eq("id", processId).single();
-        if (currentError) throw currentError;
-        shouldReposition = current.stage_id !== stageId;
-      }
-      if (shouldReposition) {
-        const { data: lastItems, error: positionError } = await supabase
-          .from("pipeline_items")
-          .select("position")
-          .eq("pipeline_id", pipelineId)
-          .eq("stage_id", stageId)
-          .eq("is_archived", false)
-          .order("position", { ascending: false })
-          .limit(1);
-        if (positionError) throw positionError;
-        payload.position = (lastItems?.[0]?.position || 0) + 1000;
-      }
-      const query = processId
-        ? supabase.from("pipeline_items").update(payload).eq("id", processId)
-        : supabase.from("pipeline_items").insert({ ...payload, created_by: state.profile.id });
-      const { error } = await query;
-      if (error) throw error;
-      closeOverlay();
-      showToast(processId ? "Processo atualizado." : "Processo criado na esteira.");
-      return renderView();
-    }
-
-    if (form.id === "admission-form") {
-      const id = String(values.id || "");
-      const payload = { apprentice_id: values.apprenticeId, company_id: values.companyId, target_start_date: values.targetStartDate || null, status: values.status || "approved", notes: String(values.notes || "").trim() };
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×o{÷„èµ©hºÚn¶X§zÍZ[\ÜÈÜ™X]PÛY[Hœ›ÛHÝ\X˜\ÙKÜÝ\X˜\ÙKZœÈŽÂš[\ÜÈÙ]YÙQÝZYHHœ›ÛH‹‹ÙÝZY\ËØØ][ÙË›ZœÈŽÂš[\ÜÈÜ™X]TYÙUÝ\ˆHœ›ÛH‹‹ÙÝZY\ËÝÝ\‹›ZœÈŽÂš[\ÜÈZ[›Ü›QÝZYHHœ›ÛH‹‹ÙÝZY\ËÙ›Ü›\Ë›ZœÈŽÂ‚˜ÛÛœÝÕTPTÑWÕT“HšÎ‹ËØÞ[Ý››[žœ™œYœš]™‹œÝ\X˜\ÙK˜ÛÈŽÂ˜ÛÛœÝÕTPTÑWÒÑVHHœØ—ÜX›\ÚX›WÛÝ™ÓÌÕ’ÌÜ\ÓšÙž[ÐWØÔÑVM“ÈŽÂ˜ÛÛœÝÒUWÓÔ’QÒSˆHÚ[™ÝË›ØØ][Û‹›ÜšYÚ[ŽÂ˜ÛÛœÝQRS—Ñ•SÕSÓˆH	ÔÕTPTÑWÕT“KÙ[˜Ý[ÛœËÝŒKÜÜ[XYZ[˜Â˜ÛÛœÝUUÓPUSÓ—Ñ•SÕSÓˆH	ÔÕTPTÑWÕT“KÙ[˜Ý[ÛœËÝŒKÜÜ[X]]ÛX][Û˜Â‚˜ÛÛœÝÝ\X˜\ÙHHÜ™X]PÛY[
+ÕTPTÑWÕT“ÕTPTÑWÒÑVKÂˆ]]ˆÂˆ\œÚ\ÝÙ\ÜÚ[ÛŽˆYKˆ]]Ô™Yœ™\ÚÚÙ[ŽˆYKˆ]XÝÙ\ÜÚ[Û’[•\›ˆYKˆKŸJNÂ‚˜ÛÛœÝ\HØÝ[Y[œ]Y\žTÙ[XÝÜŠˆØ\ŠNÂ‚˜ÛÛœÝÝ]HHÂˆÙ\ÜÚ[ÛŽˆ[ˆ›Ùš[Nˆ[ˆšY]Îˆ[ˆÙ[XÝYÛÝ\œÙRYˆ[ˆÙ[XÝY\ÜÛÛ’Yˆ[ˆ\ÜÛÛ”Ý\[™^ˆˆ›ØÚÔÛYR[™^ˆˆÙ[XÝYXÝ]š]RYˆ[ˆ]Y]\œÛÛ’Yˆ[ˆÙ\ÜÚ[Û“ÙÙÙYˆ˜[ÙKˆÚ^˜\™Ü[Žˆ˜[ÙKˆÙ]\™\]Z\™Yˆ˜[ÙKˆ[ÜNˆ×Kˆ[\Ü™\Ý[Îˆ×KˆÙ[XÝY\[[™RYˆ[ˆ\[[™TÙX\˜Úˆˆ‹ˆ\[[™Tš[Üš]Nˆˆ‹ˆ\[[™T™\ÜÛœÚX›Nˆˆ‹ˆ\[[™PÛÛ\[žNˆˆ‹ˆ\[[™TÛÜˆœ™XÙ[‹ˆ\ÚÑš[\Žˆ›Z[™H‹ˆ›ÝYšXØ][Û•[œ™XYÛÝ[ˆˆ›ÝYšXØ][Û‘š[\Žˆ›Ü[ˆ‹ˆ˜YÙÙY\[[™R][RYˆ[ˆ˜XØ[˜ÞUXŽˆ›Ý™\šY]È‹ˆ˜XØ[˜ÞTÙX\˜Úˆˆ‹ˆ˜XØ[˜ÞTÝ]\Îˆˆ‹ˆ˜XØ[˜ÞPÛÛ\[žNˆˆ‹ˆš[˜[˜ÙTÙX\˜Úˆˆ‹ˆš[˜[˜ÙTÝ]\Îˆˆ‹ˆš[˜[˜ÙPÛÛ\[žNˆˆ‹ˆš[˜[˜ÙUXŽˆœ™XÙZ]˜X›H‹ˆš[˜[˜ÙS[Ûˆ™]È]J
+KÒTÓÔÝš[™Ê
+KœÛXÙJÊKˆ^XX›TÝ]\Îˆˆ‹ˆØÝ[Y[XŽˆ™š[\È‹ˆØÝ[Y[ÙX\˜Úˆˆ‹ˆØÝ[Y[Ø]YÛÜžNˆˆ‹ˆ]]ÛX][Û•XŽˆ›Ý™\šY]È‹ˆ[™XØ]Ü”Ý\ˆˆ‹ˆ[™XØ]Ü‘[™ˆˆ‹ˆ[™XØ]Ü‘Ü›Ý\ˆ˜[‹ŸNÂ‚˜ÛÛœÝYÙUÝ\ˆHÜ™X]TYÙUÝ\ŠÂˆÛ”ÝÜˆ
+™X\ÛÛŠHOˆÂˆÝ]KÚ^˜\™Ü[ˆH˜[ÙNÂˆYˆ
+™X\ÛÛˆOOH˜ÛÛ\]YŠHÚÝÕØ\Ý
+‘ÝZXHÛÛ˜ÛpëYËˆ\ÙHÛÛ[È\Ø\ˆ\˜H™]°ê‹[È™\ÝHX˜KˆŠNÂˆKˆÛXÝ[ÛŽˆ\Þ[˜È
+XÝ[ÛŠHOˆÂˆžHÈYˆ
+XÝ[Û‹™X[ÙÊH]ØZ]Ü[‘X[ÙÊXÝ[Û‹™X[ÙÊNÈBˆØ]Ú
+\œ›ÜŠHÈÚÝÕØ\Ý
+œšY[™Q\œ›ÜŠ\œ›ÜŠK™\œ›ÜˆŠNÈBˆKŸJNÂ‚˜ÛÛœÝ›ÛSX™[ÈHÂˆØY˜ÛWØYZ[Žˆ‘\]Z\HÐQÓH‹ˆ\™[XÙNˆ’›Ý™[H\™[™^ˆ‹ˆÛÛ\[žNˆ”™\™\Ù[[HH[\™\ØH‹ŸNÂ‚˜ÛÛœÝ\\Y[X™[ÈHÂˆX[˜YÙ[Y[ˆ‘\™péðèÛÈHYZ[š\Ý˜péðèÛÈ‹ˆ˜XØ[˜ÚY\Îˆ‘Ù\Ý0èÛÈH˜YØ\È‹ˆÛÛÜ™[˜][ÛŽˆÛÛÜ™[˜péðèÛÈ‹ˆ\œÛÛ›™[ˆ‘\\[Y[È\ÜÛØ[‹ˆŽˆ”™XÝ\œÛÜÈ[X[›ÜÈ‹ˆš[˜[˜ÙNˆ‘š[˜[˜ÙZ\›È‹ŸNÂ‚˜ÛÛœÝ\\Y[\›Z\ÜÚ[ÛœÈHÂˆX[˜YÙ[Y[ˆÈŠˆ—Kˆ˜XØ[˜ÚY\ÎˆÈ™\™XÝÜžKœ™XY‹›Ü\˜][ÛœËœ™XY‹›Ü\˜][ÛœË›X[˜YÙH‹˜ÛÛ\[šY\Ëœ™XY‹˜ÛÛ\[šY\Ë›X[˜YÙH‹˜XØ[˜ÚY\Ëœ™XY‹˜XØ[˜ÚY\Ë›X[˜YÙH‹œ™\ÜËœ™XY‹œ™\ÜË™^Ü—KˆÛÛÜ™[˜][ÛŽˆÈ™\™XÝÜžKœ™XY‹˜\™[XÙKš\ÝÜžKœ™XY‹›Ü\˜][ÛœËœ™XY‹›Ü\˜][ÛœË›X[˜YÙH‹˜ÛÛ\[šY\Ëœ™XY‹˜XØY[ZXËœ™XY‹˜XØY[ZXË›X[˜YÙH‹œ™\ÜËœ™XY‹œ™\ÜË™^Ü—Kˆ\œÛÛ›™[ˆÈ™\™XÝÜžKœ™XY‹˜\™[XÙKš\ÝÜžKœ™XY‹›Ü\˜][ÛœËœ™XY‹›Ü\˜][ÛœË›X[˜YÙH‹˜ÛÛ\[šY\Ëœ™XY‹œ\œÛÛ›™[œ™XY‹œ\œÛÛ›™[›X[˜YÙH‹˜ÛÛ˜XÝËœ™XY‹˜ÛÛ˜XÝË›X[˜YÙH‹™ØÝ[Y[Ëœ™XY‹™ØÝ[Y[Ë›X[˜YÙH‹™š[˜[˜ÙKœ™XY‹™š[˜[˜ÙK›X[˜YÙH‹œ™\ÜËœ™XY‹œ™\ÜË™^Ü—KˆŽˆÈ™\™XÝÜžKœ™XY‹˜\™[XÙKš\ÝÜžKœ™XY‹›Ü\˜][ÛœËœ™XY‹›Ü\˜][ÛœË›X[˜YÙH‹˜ÛÛ\[šY\Ëœ™XY‹˜ÛÛ\[šY\Ë›X[˜YÙH‹˜XØ[˜ÚY\Ëœ™XY‹˜XØ[˜ÚY\Ë›X[˜YÙH‹œ[ÜKœ™XY‹œ[ÜK›X[˜YÙH‹˜]Y]œ™XY‹œ™\ÜËœ™XY‹œ™\ÜË™^Ü—Kˆš[˜[˜ÙNˆÈ™\™XÝÜžKœ™XY‹›Ü\˜][ÛœËœ™XY‹›Ü\˜][ÛœË›X[˜YÙH‹˜ÛÛ\[šY\Ëœ™XY‹˜ÛÛ˜XÝËœ™XY‹™ØÝ[Y[Ëœ™XY‹™ØÝ[Y[Ë›X[˜YÙH‹™š[˜[˜ÙKœ™XY‹™š[˜[˜ÙK›X[˜YÙH‹œ™\ÜËœ™XY‹œ™\ÜË™^Ü—KŸNÂ‚˜ÛÛœÝØ[™Y]TÝ]\ÓX™[ÈHÂˆ™]Îˆ“›Ý›È‹ˆØÜ™Y[š[™Îˆ‘[HšXYÙ[H‹ˆ[\šY]Îˆ‘[H[™]š\Ý\È‹ˆ\›Ý™Yˆ\›Ý˜YÈ‹ˆ™Z™XÝYˆ“°èÛÈ\›Ý˜YÈ‹ˆ\™YˆÛÛ™\YÈ[H›Ý™[H‹ˆ\˜Ú]™Yˆ\œ]Z]˜YÈ‹ŸNÂ‚˜ÛÛœÝ˜XØ[˜ÞTÝ]\ÓX™[ÈHÂˆ˜Yˆ”˜\ØÝ[šÈ‹ˆÜ[ŽˆX™\H‹ˆ]\ÙYˆ”]\ØYH‹ˆš[Yˆ”™Y[˜ÚYH‹ˆØ[˜Ù[YˆØ[˜Ù[YH‹ŸNÂ‚˜ÛÛœÝ\XØ][Û”Ý]\ÓX™[ÈHÂˆ™XÙZ]™YˆØ[™Y]È™XÙXšYÈ‹ˆØÜ™Y[š[™Îˆ•šXYÙ[H‹ˆØY˜ÛWÚ[\šY]Îˆ‘[™]š\ÝHÐQÓH‹ˆ™Y™\œ™YØÛÛ\[žNˆ‘[˜Ø[Z[šYÈ0è[\™\ØH‹ˆÛÛ\[žWÚ[\šY]Îˆ‘[™]š\ÝH˜H[\™\ØH‹ˆØZ][™×Ü™]\›ŽˆYÝX\™[™È™]Ü››È‹ˆ\›Ý™Yˆ\›Ý˜YÈ‹ˆ[[ÜÛÛˆ˜[˜ÛÈH[[ÜÈ‹ˆ™Z™XÝYˆ“°èÛÈ\›Ý˜YÈ‹ˆÚ]˜]ÛŽˆ‘\Ú\Ý[H‹ˆ\™YˆYZ\ÜðèÛÈ[šXÚXYH‹ŸNÂ‚˜ÛÛœÝYZ\ÜÚ[Û”Ý]\ÓX™[ÈHÂˆ\›Ý™Yˆ\›Ý˜YÈ‹ˆØÝ[Y[×Ü[™[™Îˆ‘ØÝ[Y[ÜÈ[™[\È‹ˆØÝ[Y[×ØÛÛ\]Nˆ‘ØÝ[Y[ÜÈÛÛ\]ÜÈ‹ˆYYXØ[Ù^[Nˆ‘^[YHYZ\ÜÚ[Û˜[‹ˆÛÛ˜XÝÜ™\\˜][ÛŽˆÛÛ˜]È[H[X›Ü˜péðèÛÈ‹ˆÚYÛ˜]\™\×Ü[™[™ÎˆYÝX\™[™È\ÜÚ[˜]\˜\È‹ˆXØÛÝ[[™ÎˆÛÛXš[YYHÈTÛØÚX[‹ˆ[œ›ÛY[ˆ“X]°ëXÝ[HÈÝ\œÛÈ‹ˆÛÛ\]YˆYZ\ÜðèÛÈÛÛ˜ÛpëYH‹ˆØ[˜Ù[YˆØ[˜Ù[YH‹ŸNÂ‚˜ÛÛœÝ\›Z[˜][Û”Ý]\ÓX™[ÈHÂˆ™\]Y\Ýˆ”ÛÛXÚ]péðèÛÈ‹ˆ[˜[\Ú\Îˆ[°è[\ÙH‹ˆYYXØ[Ù^[Nˆ‘^[YH[Z\ÜÚ[Û˜[‹ˆØÝ[Y[][ÛŽˆ‘ØÝ[Y[péðèÛÈ‹ˆXØÛÝ[[™ÎˆÛÛXš[YYH‹ˆ\›Z[˜][ÛŽˆ”™\ØÚ\ðèÛÈ‹ˆš[˜[˜ÙNˆ‘š[˜[˜ÙZ\›È‹ˆØÝ[Y[×Ù[]™\™Yˆ‘ØÝ[Y[ÜÈ[™YÝY\È‹ˆÛÛ\]YˆÛÛ˜ÛpëYÈ‹ˆØ[˜Ù[YˆØ[˜Ù[YÈ‹ŸNÂ‚˜ÛÛœÝX]™U\SX™[ÈHÂˆ˜XØ][ÛŽˆ‘°ê\šX\È‹ˆYYXØ[ÛX]™NˆY˜\Ý[Y[ÈpêYXÛÈ‹ˆÝ\—ÛX]™Nˆ“Ý]›ÈY˜\Ý[Y[È‹ŸNÂ‚˜ÛÛœÝX]™TÝ]\ÓX™[ÈHÂˆ[›™Yˆ”[™Z˜YÈ‹ˆ\›Ý™Yˆ\›Ý˜YÈ‹ˆ[—Ü›ÙÜ™\ÜÎˆ‘[H[™[Y[È‹ˆÛÛ\]YˆÛÛ˜ÛpëYÈ‹ˆØ[˜Ù[YˆØ[˜Ù[YÈ‹ŸNÂ‚˜ÛÛœÝXØÛÝ[[™ÔÝ]\ÓX™[ÈHÂˆ[™[™Îˆ”[™[H‹ˆ™\\š[™Îˆ‘[H™\\˜péðèÛÈ‹ˆÙ[ˆ‘[šXYÈ‹ˆØZ][™×Ü™\ÜÛœÙNˆYÝX\™[™È™]Ü››È‹ˆ™XÙZ]™Yˆ”™XÙXšYÈ‹ˆ™\šYšYYˆÛÛ™™\šYÈ‹ˆÛÛ\]YˆÛÛ˜ÛpëYÈ‹ŸNÂ‚˜ÛÛœÝš[˜[˜ÚX[Ý]\ÓX™[ÈHÂˆ×Ú[›ÚXÙNˆH˜]\˜\ˆ‹ˆ[›ÚXÙWÚ\ÜÝYYˆ“‘ˆ[Z]YH‹ˆ^[Y[ÜÛ\Ú\ÜÝYYˆ›Û]È[Z]YÈ‹ˆÙ[ˆ‘[šXYÈ‹ˆ×ÙYNˆH™[˜Ù\ˆ‹ˆÝ™\™YNˆ•™[˜ÚYÈ‹ˆÛÛXÝ[ÛŽˆ‘[HÛØœ˜[°éØH‹ˆZYˆ”YÛÈ‹ˆØ[˜Ù[YˆØ[˜Ù[YÈ‹ŸNÂ‚˜ÛÛœÝ^XX›TÝ]\ÓX™[ÈHÂˆ[™[™ÎˆYÝX\™[™È\›Ý˜péðèÛÈ‹ˆ\›Ý™Yˆ\›Ý˜YH‹ˆØÚY[Yˆ”›ÙÜ˜[XYH‹ˆZYˆ”YØH‹ˆØ[˜Ù[YˆØ[˜Ù[YH‹ŸNÂ‚˜ÛÛœÝØÝ[Y[Ø]YÛÜžSX™[ÈHÂˆYZ\ÜÚ[ÛŽˆYZ\ÜðèÛÈ‹ˆÛÛ˜XÝˆÛÛ˜]È‹ˆØÝ[Y[Îˆ‘ØÝ[Y[péðèÛÈÙ\˜[‹ˆ˜XØ][ÛŽˆ‘°ê\šX\È‹ˆX]™NˆY˜\Ý[Y[È‹ˆ\›Z[˜][ÛŽˆ‘\ÛYØ[Y[È‹ˆXØÛÝ[[™ÎˆÛÛXš[YYH‹ˆš[˜[˜ÙNˆ‘š[˜[˜ÙZ\›È‹ˆ^\›Ûˆ‘›ÛHHYØ[Y[È‹ˆ™YÚ\Ý˜][Û—ØÚ[™ÙNˆ[\˜péðèÛÈØY\Ý˜[‹ˆ[›ÚXÙNˆ“›ÝHš\ØØ[‹ˆ^[Y[ÜÛ\ˆ›Û]È‹ˆ™XÙZ\ˆÛÛ\›Ý˜[H‹ˆÝ\Žˆ“Ý]›È‹ŸNÂ‚˜ÛÛœÝØÝ[Y[™\]Z\™[Y[Ý]\ÓX™[ÈHÂˆ[™[™Îˆ”[™[H‹ˆ™XÙZ]™Yˆ”™XÙXšYÈ‹ˆ™\šYšYYˆÛÛ™™\šYÈ‹ˆØZ]™Yˆ‘\Ü[œØYÈ‹ŸNÂ‚˜ÛÛœÝšY]Ô\›Z\ÜÚ[ÛœÈHÂˆÝ™\šY]Îˆ›Ü\˜][ÛœËœ™XY‹ˆ\[[™\Îˆ›Ü\˜][ÛœËœ™XY‹ˆ\ÚÜÎˆ›Ü\˜][ÛœËœ™XY‹ˆ›ÝYšXØ][ÛœÎˆ›Ü\˜][ÛœËœ™XY‹ˆ]]ÛX][ÛœÎˆ›Ü\˜][ÛœËœ™XY‹ˆ˜XØ[˜ÚY\Îˆ˜XØ[˜ÚY\Ëœ™XY‹ˆ\™\œÚ\Îˆ˜XØ[˜ÚY\Ëœ™XY‹ˆÛÛ\[šY\Îˆ˜ÛÛ\[šY\Ëœ™XY‹ˆ\™[XÙ\Îˆ™\™XÝÜžKœ™XY‹ˆYZ\ÜÚ[ÛœÎˆœ\œÛÛ›™[œ™XY‹ˆÛÛ˜XÝÎˆ˜ÛÛ˜XÝËœ™XY‹ˆX]™\Îˆœ\œÛÛ›™[œ™XY‹ˆ\›Z[˜][ÛœÎˆœ\œÛÛ›™[œ™XY‹ˆ\œÛÛ›™[ˆœ\œÛÛ›™[œ™XY‹ˆš[˜[˜ÙNˆ™š[˜[˜ÙKœ™XY‹ˆÛÝ\œÙ\Îˆ˜XØY[ZXËœ™XY‹ˆ˜ÛÝ\œÙKYY]ÜˆŽˆ˜XØY[ZXËœ™XY‹ˆ›\ÜÛÛ‹YY]ÜˆŽˆ˜XØY[ZXËœ™XY‹ˆ[œ›ÛY[Îˆ˜XØY[ZXËœ™XY‹ˆØÝ[Y[Îˆ™ØÝ[Y[Ëœ™XY‹ˆXØÛÝ[[™Îˆ™š[˜[˜ÙKœ™XY‹ˆ›ØÙY\™\Îˆ›Ü\˜][ÛœËœ™XY‹ˆ[ÜNˆœ[ÜKœ™XY‹ˆ]Y]ˆ˜]Y]œ™XY‹ˆ[™XØ]ÜœÎˆœ™\ÜËœ™XY‹ŸNÂ‚™[˜Ý[Ûˆ›Ùš[Q\\Y[
+›Ùš[HHÝ]Kœ›Ùš[JHÂˆ™]\›ˆ›Ùš[OËœ›ÛHOOH˜ØY˜ÛWØYZ[ˆˆÈ›Ùš[K™\\Y[›X[˜YÙ[Y[ˆˆ[ÂŸB‚™[˜Ý[Ûˆ\Ô\›Z\ÜÚ[ÛŠ\›Z\ÜÚ[Û‹›Ùš[HHÝ]Kœ›Ùš[JHÂˆYˆ
+›Ùš[OËœ›ÛHOOH˜ØY˜ÛWØYZ[ˆŠH™]\›ˆ˜[ÙNÂˆÛÛœÝ\›Z\ÜÚ[ÛœÈH\\Y[\›Z\ÜÚ[ÛœÖÜ›Ùš[Q\\Y[
+›Ùš[JWH×NÂˆ™]\›ˆ\›Z\ÜÚ[ÛœËš[˜ÛY\ÊŠˆŠH\›Z\ÜÚ[ÛœËš[˜ÛY\Ê\›Z\ÜÚ[ÛŠNÂŸB‚™[˜Ý[Ûˆ›Ùš[PXØÙ\ÜÓX™[
+›Ùš[HHÝ]Kœ›Ùš[JHÂˆYˆ
+›Ùš[OËœ›ÛHOOH˜ØY˜ÛWØYZ[ˆŠH™]\›ˆ›ÛSX™[ÖÜ›Ùš[OËœ›ÛWHXÙ\ÜÛÈŽÂˆ™]\›ˆ\\Y[X™[ÖÜ›Ùš[Q\\Y[
+›Ùš[JWH›ÛSX™[Ë˜ØY˜ÛWØYZ[ŽÂŸB‚™[˜Ý[Ûˆ\\Y[Ü[ÛœÊÙ[XÝYH›X[˜YÙ[Y[ŠHÂˆ™]\›ˆØš™XÝ™[šY\Ê\\Y[X™[ÊBˆ›X\
+
+Ý˜[YKX™[JHOˆÜ[Ûˆ˜[YOH‰Ý˜[Y_Hˆ	Ý˜[YHOOHÙ[XÝYÈœÙ[XÝYˆˆˆŸO‰ÛX™[OÛÜ[Û˜
+Bˆš›Ú[ŠˆŠNÂŸB‚™[˜Ý[ÛˆØ[“X[˜YÙT\œÛÛŠ\œÛÛŠHÂˆYˆ
+Z\Ô\›Z\ÜÚ[ÛŠœ[ÜK›X[˜YÙHŠJH™]\›ˆ˜[ÙNÂˆ™]\›ˆ\œÛÛËœ›ÛHOOH˜ØY˜ÛWØYZ[ˆˆ›Ùš[Q\\Y[
+
+HOOH›X[˜YÙ[Y[ŽÂŸB‚˜ÛÛœÝ›ØÚÕ\SX™[ÈHÂˆ^ˆ•^ÈH[XYÙ[H‹ˆÛY\Îˆ\™\Ù[péðèÛÈ[HÛY\È‹ˆšY[Îˆ•°ëY[È‹ˆÛÛœÚY\˜][ÛœÎˆÛÛœÚY\˜péðíY\Èš[˜Z\È‹ŸNÂ‚˜ÛÛœÝ]Y]XÝ[Û“X™[ÈHÂˆ\Ù\‹š[š]YŽˆ”\ÜÛØHÛÛšYYH‹ˆ\Ù\‹\]YŽˆ”\™š[ÝHÜ™Y[˜ÚX[[\˜YH‹ˆ\Ù\‹œ™XÛÝ™\žWÜÙ[Žˆ”™XÝ\\˜péðèÛÈHÙ[šH[šXYH‹ˆ\Ù\‹š[š]WÜ™\Ù[ŽˆÛÛš]H™Y[šXYÈ‹ˆ\Ù\‹˜XØÙ\Ü×Ø\˜Ú]™YŽˆXÙ\ÜÛÈ^ÛpëYÈH\œ]Z]˜YÈ‹ˆ\Ù\‹˜XØÙ\Ü×Ü™\ÝÜ™YŽˆXÙ\ÜÛÈ™\Ý]\˜YÈ‹ˆ\Ù\‹š[\ÜÚ[š]YŽˆ”\ÜÛØHÛÛšYYHÜˆ[\ÜpéðèÛÈ‹ˆ\Ù\‹š[\ÜÝ\]YŽˆ”\™š[]X[^˜YÈÜˆ[\ÜpéðèÛÈ‹ˆœ[ÜKš[\ÜYŽˆ’[\ÜpéðèÛÈH\ÜÛØ\È‹ˆœÙ\ÜÚ[Û‹œÝ\YŽˆ‘[˜YH›ÈÜ[‹ˆœÙ\ÜÚ[Û‹™[™YŽˆ”ØpëYHÈÜ[‹ˆ˜ÛÝ\œÙK›Ü[™YŽˆÝ\œÛÈX™\È‹ˆ›\ÜÛÛ‹›Ü[™YŽˆ][HX™\H‹ˆœ›Ùš[Kœ\ÜÝÛÜ™ØÚ[™ÙYŽˆ”Ù[šH\ÜÛØ[[\˜YH‹ˆ˜ÛÛ\[šY\Ëš[œÙ\Žˆ‘[\™\ØHØY\Ý˜YH‹ˆ˜ÛÛ\[šY\Ë\]HŽˆ‘[\™\ØH[\˜YH‹ˆ˜ÛÛ\[šY\Ë™[]HŽˆ‘[\™\ØH^ÛpëYH‹ˆ˜Ø[™Y]\Ëš[œÙ\ŽˆØ[™Y]ÈØY\Ý˜YÈ‹ˆ˜Ø[™Y]\Ë\]HŽˆØ[™Y]È]X[^˜YÈ‹ˆ˜Ø[™Y]\Ë™[]HŽˆØ[™Y]È^ÛpëYÈ‹ˆš›Ø—Ý˜XØ[˜ÚY\Ëš[œÙ\Žˆ•˜YØHÜšXYH‹ˆš›Ø—Ý˜XØ[˜ÚY\Ë\]HŽˆ•˜YØH]X[^˜YH‹ˆš›Ø—Ý˜XØ[˜ÚY\Ë™[]HŽˆ•˜YØH^ÛpëYH‹ˆ˜XØ[˜ÞWØ\XØ][ÛœËš[œÙ\Žˆ”Ù[péðèÛÈ[šXÚXYH‹ˆ˜XØ[˜ÞWØ\XØ][ÛœË\]HŽˆ‘]\HHÙ[péðèÛÈ]X[^˜YH‹ˆ˜XØ[˜ÞWØ\XØ][ÛœË™[]HŽˆ”Ù[péðèÛÈ^ÛpëYH‹ˆœ\™\œÚ\ØYÜ™Y[Y[Ëš[œÙ\Žˆ”\˜Ù\šXHØY\Ý˜YH‹ˆœ\™\œÚ\ØYÜ™Y[Y[Ë\]HŽˆ”\˜Ù\šXH]X[^˜YH‹ˆœ\™\œÚ\ØYÜ™Y[Y[Ë™[]HŽˆ”\˜Ù\šXH^ÛpëYH‹ˆ˜Ø[™Y]WÙØÝ[Y[Ëš[œÙ\Žˆ‘ØÝ[Y[ÈHØ[™Y]È[šXYÈ‹ˆ˜Ø[™Y]K˜ÛÛ™\YŽˆØ[™Y]ÈÛÛ™\YÈ[H›Ý™[H‹ˆ™š[˜[˜ÚX[ØÚ\™Ù\Ëš[œÙ\ŽˆÛØœ˜[°éØHÜšXYH‹ˆ™š[˜[˜ÚX[ØÚ\™Ù\Ë\]HŽˆÛØœ˜[°éØH]X[^˜YH‹ˆ™š[˜[˜ÚX[ØÚ\™Ù\Ë™[]HŽˆÛØœ˜[°éØH^ÛpëYH‹ˆ˜XØÛÝ[×Ü^XX›Kš[œÙ\ŽˆÛÛHHYØ\ˆÜšXYH‹ˆ˜XØÛÝ[×Ü^XX›K\]HŽˆÛÛHHYØ\ˆ]X[^˜YH‹ˆ˜XØÛÝ[×Ü^XX›K™[]HŽˆÛÛHHYØ\ˆ^ÛpëYH‹ˆ™ØÝ[Y[Ü™\]Z\™[Y[Ëš[œÙ\Žˆ”[™0ê›˜ÚXHØÝ[Y[[ÜšXYH‹ˆ™ØÝ[Y[Ü™\]Z\™[Y[Ë\]HŽˆ”[™0ê›˜ÚXHØÝ[Y[[]X[^˜YH‹ˆ™ØÝ[Y[Ü™\]Z\™[Y[Ë™[]HŽˆ”[™0ê›˜ÚXHØÝ[Y[[^ÛpëYH‹ˆ\›Z[˜][Û—ØÚXÚÛ\ÝÚ][\Ëš[œÙ\Žˆ’][HH\ÛYØ[Y[ÈÜšXYÈ‹ˆ\›Z[˜][Û—ØÚXÚÛ\ÝÚ][\Ë\]HŽˆÚXÚÛ\ÝH\ÛYØ[Y[È]X[^˜YÈ‹ˆ\›Z[˜][Û—ØÚXÚÛ\ÝÚ][\Ë™[]HŽˆ’][HH\ÛYØ[Y[È^ÛpëYÈ‹ˆ™ØÝ[Y[Ü™XÛÜ™Ë\]HŽˆ‘ØÝ[Y[È]X[^˜YÈ‹ˆ›X]™WÜ™XÛÜ™Ëš[œÙ\Žˆ‘°ê\šX\ÈÝHY˜\Ý[Y[È™YÚ\Ý˜YÈ‹ˆ›X]™WÜ™XÛÜ™Ë\]HŽˆ‘°ê\šX\ÈÝHY˜\Ý[Y[È]X[^˜YÈ‹ˆ\›Z[˜][Û—ØØ\Ù\Ëš[œÙ\Žˆ‘\ÛYØ[Y[ÈX™\È‹ˆ\›Z[˜][Û—ØØ\Ù\Ë\]HŽˆ‘\ÛYØ[Y[È]X[^˜YÈ‹ˆ˜XØÛÝ[[™×Ù\Ü]Ú\Ëš[œÙ\Žˆ‘[š[È0èÛÛXš[YYHÜšXYÈ‹ˆ˜XØÛÝ[[™×Ù\Ü]Ú\Ë\]HŽˆ‘[š[È0èÛÛXš[YYH]X[^˜YÈ‹ˆœ›Ùš[\Ë\]HŽˆ”\™š[[\˜YÈ‹ˆ˜ÛÝ\œÙ\Ëš[œÙ\ŽˆÝ\œÛÈÜšXYÈ‹ˆ˜ÛÝ\œÙ\Ë\]HŽˆÝ\œÛÈ[\˜YÈ‹ˆ˜ÛÝ\œÙ\Ë™[]HŽˆÝ\œÛÈ^ÛpëYÈ‹ˆ›\ÜÛÛœËš[œÙ\Žˆ][HÜšXYH‹ˆ›\ÜÛÛœË\]HŽˆ][H[\˜YH‹ˆ›\ÜÛÛœË™[]HŽˆ][H^ÛpëYH‹ˆ›\ÜÛÛ—Ø›ØÚÜËš[œÙ\Žˆ“[šHH\™[™^˜YÙ[HÜšXYH‹ˆ›\ÜÛÛ—Ø›ØÚÜË\]HŽˆ“[šHH\™[™^˜YÙ[H[\˜YH‹ˆ›\ÜÛÛ—Ø›ØÚÜË™[]HŽˆ“[šHH\™[™^˜YÙ[H^ÛpëYH‹ˆ˜XÝ]š]Y\Ëš[œÙ\Žˆ]]šYYHÜšXYH‹ˆ˜XÝ]š]Y\Ë\]HŽˆ]]šYYH[\˜YH‹ˆ˜XÝ]š]Y\Ë™[]HŽˆ]]šYYH^ÛpëYH‹ˆ™[œ›ÛY[Ëš[œÙ\Žˆ“X]°ëXÝ[HÜšXYH‹ˆ™[œ›ÛY[Ë™[]HŽˆ“X]°ëXÝ[H™[[ÝšYH‹ˆ›\ÜÛÛ—Ü›ÙÜ™\ÜËš[œÙ\Žˆ][HÛÛ˜ÛpëYH‹ˆ›\ÜÛÛ—Ü›ÙÜ™\ÜË™[]HŽˆÛÛ˜Û\ðèÛÈH][H\ÛX\˜ØYH‹ˆ˜XÝ]š]WØ][\Ëš[œÙ\Žˆ]]šYYH[šXYH‹ˆ˜XÝ]š]WØ][\Ë\]HŽˆ]]šYYH]X[^˜YH‹ˆ˜XÝ]š]WÜ™\ÜÛœÙ\Ëš[œÙ\Žˆ”™\ÜÜÝH™YÚ\Ý˜YH‹ˆ˜XÝ]š]WÜ™\ÜÛœÙ\Ë\]HŽˆ”™\ÜÜÝH[\˜YH‹ˆœ\[[™\Ëš[œÙ\Žˆ‘\ÝZ\˜HÜšXYH‹ˆœ\[[™\Ë\]HŽˆ‘\ÝZ\˜H[\˜YH‹ˆœ\[[™WÜÝYÙ\Ëš[œÙ\Žˆ‘]\HÜšXYH‹ˆœ\[[™WÜÝYÙ\Ë\]HŽˆ‘]\H[\˜YH‹ˆœ\[[™WÚ][\Ëš[œÙ\Žˆ”›ØÙ\ÜÛÈÜšXYÈ‹ˆœ\[[™WÚ][\Ë\]HŽˆ”›ØÙ\ÜÛÈ[\˜YÈÝH[Ýš[Y[YÈ‹ˆœ\[[™WÚ][\Ë™[]HŽˆ”›ØÙ\ÜÛÈ^ÛpëYÈ‹ˆ\ÚÜËš[œÙ\Žˆ•\™Y˜HÜšXYH‹ˆ\ÚÜË\]HŽˆ•\™Y˜H[\˜YH‹ˆ\ÚÜË™[]HŽˆ•\™Y˜H^ÛpëYH‹ˆ\Ú×ØÚXÚÛ\ÝÚ][\Ëš[œÙ\Žˆ’][HHÚXÚÛ\ÝÜšXYÈ‹ˆ\Ú×ØÚXÚÛ\ÝÚ][\Ë\]HŽˆÚXÚÛ\ÝH\™Y˜H]X[^˜YÈ‹ˆ\Ú×ØÚXÚÛ\ÝÚ][\Ë™[]HŽˆ’][HHÚXÚÛ\Ý^ÛpëYÈ‹ŸNÂ‚˜ÛÛœÝ˜]šYØ][ÛˆHÂˆØY˜ÛWØYZ[ŽˆÂˆÈX™[ˆ”Z[™[‹][\ÎˆÖÈ›Ý™\šY]È‹•š\ðèÛÈÙ\˜[‹™ÜšY—KÈš[™XØ]ÜœÈ‹’[™XØYÜ™\ÈH™[]0ìÜš[ÜÈ‹š\ÝÜžH—WHKˆÈX™[ˆ“Ü\˜péðíY\È‹][\ÎˆÂˆÈœ\[[™\È‹Ù[˜[H\ÝZ\˜\È‹šØ[˜˜[ˆ—KˆÈ\ÚÜÈ‹•\™Y˜\ÈH[™0ê›˜ÚX\È‹\ÚÜÈ—KˆÈ››ÝYšXØ][ÛœÈ‹“›ÝYšXØpéðíY\È‹˜™[—KˆÈ˜]]ÛX][ÛœÈ‹]]ÛXpéðíY\È‹˜ÛØÚÈ—KˆHKˆÈX™[ˆ‘Ù\Ý0èÛÈH˜YØ\È‹][\ÎˆÂˆÈ˜XØ[˜ÚY\È‹•˜YØ\ÈHØ[™Y]ÜÈ‹šØ[˜˜[ˆ—KˆÈœ\™\œÚ\È‹”\˜Ù\šX\ÈH›Ý™[œÈ‹˜Z[[™È—KˆHKˆÈX™[ˆ‘[\™\Ø\È‹][\ÎˆÖÈ˜ÛÛ\[šY\È‹‘[\™\Ø\È\˜ÙZ\˜\È‹˜Z[[™È—WHKˆÈX™[ˆ’›Ý™[œÈ‹][\ÎˆÂˆÈ˜\™[XÙ\È‹’›Ý™[œÈÈ\™[™^™\È‹\Ù\œÈ—KˆÈ˜YZ\ÜÚ[ÛœÈ‹YZ\ÜðíY\È‹\ÚÜÈ—KˆÈ˜ÛÛ˜XÝÈ‹ÛÛ˜]ÜÈ‹˜Ø[[™\ˆ—KˆÈ›X]™\È‹‘°ê\šX\ÈHY˜\Ý[Y[ÜÈ‹š\ÝÜžH—KˆÈ\›Z[˜][ÛœÈ‹‘\ÛYØ[Y[ÜÈ‹˜[\—KˆHKˆÈX™[ˆXØY0ê›ZXÛÈ‹][\ÎˆÂˆÈ˜ÛÝ\œÙ\È‹Ý\œÛÜÈ‹˜›ÛÚÈ—KˆÈ™[œ›ÛY[È‹“X]°ëXÝ[\È‹›[šÈ—KˆHKˆÈX™[ˆYZ[š\Ý˜]]›È‹][\ÎˆÂˆÈœ\œÛÛ›™[‹‘\\[Y[È\ÜÛØ[‹\Ù\œÈ—KˆÈ™š[˜[˜ÙH‹‘š[˜[˜ÙZ\›È‹˜Ø[[™\ˆ—KˆÈ™ØÝ[Y[È‹‘ØÝ[Y[ÜÈ‹\ØY—KˆÈ˜XØÛÝ[[™È‹ÛÛXš[YYH‹›XZ[—KˆÈœ›ØÙY\™\È‹”›ØÙY[Y[ÜÈ‹\ÚÜÈ—KˆÈœ[ÜH‹”\ÜÛØ\ÈHÛÛš]\È‹\Ù\œÈ—KˆÈ˜]Y]‹]Y]ÜšXH‹š\ÝÜžH—KˆHKˆKˆ\™[XÙNˆÂˆÈX™[ˆ’›Ý™[H\™[™^ˆ‹][\ÎˆÂˆÈœÝY[ZÛYH‹’[°ëXÚ[È‹šÛYH—KˆÈœÝY[XÛÝ\œÙ\È‹“Y]\ÈÝ\œÛÜÈ‹˜›ÛÚÈ—KˆÈœÝY[XXÝ]š]Y\È‹]]šYY\È‹˜ÚXÚÈ—KˆHKˆKˆÛÛ\[žNˆÂˆÈX™[ˆ”™\™\Ù[[HH[\™\ØH‹][\ÎˆÂˆÈ˜ÛÛ\[žKZÛYH‹•š\ðèÛÈÙ\˜[‹™ÜšY—KˆÈ˜ÛÛ\[žKX\™[XÙ\È‹\™[™^™\È‹\Ù\œÈ—KˆHKˆKŸNÂ‚™[˜Ý[ÛˆØ[XØÙ\ÜÕšY]ÊšY]Ë›Ùš[HHÝ]Kœ›Ùš[JHÂˆYˆ
+\›Ùš[JH™]\›ˆ˜[ÙNÂˆYˆ
+›Ùš[Kœ›ÛHOOH˜\™[XÙHŠH™]\›ˆÈœÝY[ZÛYH‹œÝY[XÛÝ\œÙ\È‹œÝY[XXÝ]š]Y\È‹œÝY[XÛÝ\œÙH—Kš[˜ÛY\ÊšY]ÊNÂˆYˆ
+›Ùš[Kœ›ÛHOOH˜ÛÛ\[žHŠH™]\›ˆÈ˜ÛÛ\[žKZÛYH‹˜ÛÛ\[žKX\™[XÙ\È—Kš[˜ÛY\ÊšY]ÊNÂˆÛÛœÝ\›Z\ÜÚ[ÛˆHšY]Ô\›Z\ÜÚ[ÛœÖÝšY]×NÂˆ™]\›ˆ›ÛÛX[Š\›Z\ÜÚ[Ûˆ	‰ˆ\Ô\›Z\ÜÚ[ÛŠ\›Z\ÜÚ[Û‹›Ùš[JJNÂŸB‚™[˜Ý[Ûˆ˜]šYØ][Û‘›Ü”›Ùš[J›Ùš[HHÝ]Kœ›Ùš[JHÂˆ™]\›ˆ
+˜]šYØ][Û–Ü›Ùš[OËœ›ÛWH×JBˆ›X\
+
+Ü›Ý\
+HOˆ
+È‹‹™Ü›Ý\][\Îˆ
+Ü›Ý\š][\È×JK™š[\Š
+ÝšY]×JHOˆØ[XØÙ\ÜÕšY]ÊšY]Ë›Ùš[JJHJJBˆ™š[\Š
+Ü›Ý\
+HOˆÜ›Ý\š][\Ë›[™Ý
+NÂŸB‚™[˜Ý[Ûˆ˜]šYØ][Û’][\Ê›Ùš[HHÝ]Kœ›Ùš[JHÂˆ™]\›ˆ˜]šYØ][Û‘›Ü”›Ùš[J›Ùš[JK™›]X\
+
+Ü›Ý\
+HOˆÜ›Ý\š][\È×JNÂŸB‚‹ËÈÝZY\È\™HYš[™YžHYÙK›Ý\\Y[È™[™\™Y\›Z\ÜÚ[ÛœÈÝ[\K‚‚˜ÛÛœÝXÛÛœÈHÂˆÜšYˆ	Ï™XÝHŒÈˆOHŒÈˆÚYHÈˆZYÚHÈˆžHŒˆ‹Ï™XÝHŒMˆOHŒÈˆÚYHÈˆZYÚHÈˆžHŒˆ‹Ï™XÝHŒÈˆOHŒMˆÚYHÈˆZYÚHÈˆžHŒˆ‹Ï™XÝHŒMˆOHŒMˆÚYHÈˆZYÚHÈˆžHŒˆ‹Ï‰ËˆÛYNˆ	Ï]H›LÈLHKNH‹Ï]H“MHLŒLMŒLNHŒ‹Mšˆ‹Ï‰ËˆZ[[™Îˆ	Ï]H“MŒUŒÚL]ŒNLMHZ]ŒL“NÚÓNLZÓNMZÓMÈŒZM‹Ï‰Ëˆ\Ù\œÎˆ	Ï]H“LMˆŒ]‹L˜MMM˜MMŒ“NHLXMHNLŒˆŒ]‹L˜MLËLËŽÓLMˆËŒLØMHËÍH‹Ï‰Ëˆ›ÛÚÎˆ	Ï]H“MNKPL‹H‹HH‹HMÒŒ‹PL‹H‹H‹^ˆ‹Ï]H“M‹]ŒLÓN‹Ï‰Ëˆ[šÎˆ	Ï]H“LLLØMHHËK[‹L˜MHHMËMÛLKŒHKŒH‹Ï]H“LMLXMHHMËKK[Lˆ˜MHHÈÛKŒKLKŒH‹Ï‰ËˆÚXÚÎˆ	Ï]H›MHLˆNHˆ‹Ï‰Ëˆ\Îˆ	Ï]H“LLˆ]ŒMMHLšM‹Ï‰Ëˆ\œ›ÝÎˆ	Ï]H“MHLšMKMKMHHKMHH‹Ï‰ËˆÙÛÝ]ˆ	Ï]H“LLMÛKMKMKMSLMHL’ÓLMXLˆˆHˆŒL˜LˆˆKLˆšMH‹Ï‰ËˆY[Nˆ	Ï]H“MÚM“MLšM“MMÚMˆ‹Ï‰ËˆÛÜÙNˆ	Ï]H›MˆˆLˆL“LNˆˆN‹Ï‰Ëˆ[ˆ	ÏÚ\˜ÛHÞHŒLˆˆÞOHŒLˆˆHŽH‹Ï]H“NKˆXL‹H‹HHHŒHKŽXËLHŽLKÈKŒ‹LKÈ‹“LLˆMÚŒH‹Ï‰ËˆXZ[ˆ	Ï™XÝHŒÈˆOHHˆÚYHŒNˆZYÚHŒMˆžHŒÈ‹Ï]H›MÈˆMˆ‹Ï‰ËˆØÚÎˆ	Ï™XÝHˆOHŒLˆÚYHŒMˆˆZYÚHŒLHˆžHŒÈ‹Ï]H“NLØMHŒÈ‹Ï‰ËˆÛØÚÎˆ	ÏÚ\˜ÛHÞHŒLˆˆÞOHŒLˆˆHŽH‹Ï]H“LLˆÝ›ˆ‹Ï‰ËˆÚY[ˆ	Ï]H“LLˆÈXÌHËˆL‹LKMHLLžˆ‹Ï]H›NHLˆˆˆM‹Ï‰Ëˆ[\Nˆ	Ï]H“MËHLˆÛ]ŽSLˆŒ[NM^ˆ‹Ï]H›MËHHMSLLˆLŽH‹Ï‰ËˆÚ]œ›ÛŽˆ	Ï]H›NHN‹M‹M‹Mˆ‹Ï‰ËˆY]ˆ	Ï]H“LLˆŒSLM‹HËXL‹ŒH‹ŒHHÈÓNMHKMˆ‹Ï‰ËˆØ[[™\Žˆ	Ï™XÝHŒÈˆOHHˆÚYHŒNˆZYÚHŒMˆˆžHŒÈ‹Ï]H“NÝLMˆÝLÈLN‹Ï‰Ëˆ˜\Úˆ	Ï]H“MÚM“NHÕŒÓMÈÛHMKLMLLL]“LML]ˆ‹Ï‰Ëˆ\˜Ú]™Nˆ	Ï™XÝHŒÈˆOHˆÚYHŒNˆZYÚHHˆžHŒH‹Ï]H“MH]ŒLZMŽSLLLÚ‹Ï‰ËˆÛÜNˆ	Ï™XÝHŽHˆOHŽHˆÚYHŒLHˆZYÚHŒLHˆžHŒˆ‹Ï]H“LMHU˜LˆˆL‹L’˜LˆˆLˆØLˆˆˆšÈ‹Ï‰Ëˆ\ÝÜžNˆ	Ï]H“LÈL˜NHHHËM‹ÓÈ‹Ï]H“LÈÝZSLLˆÝ[Èˆ‹Ï‰ËˆÝÛ›ØYˆ	Ï]H“LLˆÝŒL“MÈLHHKMSMŒZMˆ‹Ï‰Ëˆ\ØYˆ	Ï]H“LLˆM•MÈ[KMHHSMŒZMˆ‹Ï‰Ëˆ^Nˆ	ÏÚ\˜ÛHÞHŒLˆˆÞOHŒLˆˆHŽH‹Ï]H›LLˆMˆˆ‹Ï‰Ëˆ[XYÙNˆ	Ï™XÝHŒÈˆOHˆÚYHŒNˆZYÚHŒMˆˆžHŒˆ‹ÏÚ\˜ÛHÞHŽHˆÞOHŽHˆHŒˆ‹Ï]H›LŒHMKMKMSHŒ‹Ï‰Ëˆ™\Ù[][ÛŽˆ	Ï]H“MÚMŒL’“NŒ[Mˆ“LˆÚŒ‹Ï‰ËˆØ[˜˜[Žˆ	Ï™XÝHŒÈˆOHˆÚYHHˆZYÚHŒMˆˆžHŒKH‹Ï™XÝHŒLˆOHˆÚYHHˆZYÚHŒLˆžHŒKH‹Ï™XÝHŒMÈˆOHˆÚYHˆZYÚHŒLÈˆžHŒKH‹Ï‰Ëˆ\ÚÜÎˆ	Ï]H›MÈˆˆMMM[ˆˆMLLÈÚÓLLÈMZÈ‹Ï‰Ëˆ™[ˆ	Ï]H“LNMˆˆLLˆÌËLÈËLÈZNÌL‹LËL‹LËNSLLŒZ‹Ï‰Ëˆ[\ˆ	Ï]H“LLˆÈ‹ŽNZNˆ‹Ï]H“LLˆ]LLˆMÚŒH‹Ï‰ËˆÙX\˜Úˆ	ÏÚ\˜ÛHÞHŒLHˆÞOHŒLHˆHÈ‹Ï]H›LŒŒMM‹Ï‰Ëˆ^YNˆ	Ï]H“L‹HLœÌËKMˆKKMˆKHˆKH‹LËH‹NKH‹NKKM‹NKKM–ˆ‹ÏÚ\˜ÛHÞHŒLˆˆÞOHŒLˆˆHŒ‹H‹Ï‰Ëˆ›YÎˆ	Ï]H“MHŒUMHZL[LˆˆH‹Ï‰ËŸNÂ‚™[˜Ý[ÛˆXÛÛŠ˜[YKÛ\ÜÓ˜[YHHˆŠHÂˆ™]\›ˆÝ™ÈÛ\ÜÏHšXÛÛˆ	ØÛ\ÜÓ˜[Y_Hˆ\šXKZY[HYHˆšY]Ð›ÞHŒˆš[H››Û™HˆÝ›ÚÙOH˜Ý\œ™[ÛÛÜˆˆÝ›ÚÙK]ÚYHŒKŽˆÝ›ÚÙK[[™XØ\Hœ›Ý[™ˆÝ›ÚÙK[[™Z›Ú[Hœ›Ý[™‰ÚXÛÛœÖÛ˜[YWHXÛÛœË™ÜšYOÜÝ™Ï˜ÂŸB‚™[˜Ý[Ûˆ\ØØ\R[
+˜[YJHÂˆ™]\›ˆÝš[™Ê˜[YHÏÈˆŠKœ™\XÙJÖÉˆ‰×KÙË
+Ú\˜XÝ\ŠHOˆ
+Âˆ‰ˆŽˆ‰˜[\È‹ˆŽˆ‰›È‹ˆˆŽˆ‰™ÝÈ‹ˆ	È‰Îˆ‰œ][ÝÈ‹ˆ‰ÈŽˆ‰ˆÌÎNÈ‹ˆJVØÚ\˜XÝ\—JNÂŸB‚™[˜Ý[Ûˆ[š]X[Ê˜[YJHÂˆ™]\›ˆÝš[™Ê˜[YHÐHŠKš[J
+KœÜ]
+×ÊËÊKœÛXÙJŠK›X\
+
+\
+HOˆ\ÌHˆŠKš›Ú[ŠˆŠKÕ\\Ø\ÙJ
+NÂŸB‚™[˜Ý[Ûˆ›Ü›X]]J˜[YKÚ][YHH˜[ÙJHÂˆYˆ
+]˜[YJH™]\›ˆ”Ù[H˜^›ÈŽÂˆÛÛœÝ]HH™]È]J×—ÍKWÌŸKWÌŸIË\Ý
+Ýš[™Ê˜[YJJHÈ	Ý˜[Y_ULŽŒŒˆ˜[YJNÂˆYˆ
+[X™\‹š\Ó˜SŠ]K™Ù][YJ
+JJH™]\›ˆ”Ù[H˜^›ÈŽÂˆ™]\›ˆ™]È[‘]U[YQ›Ü›X]
+œP”ˆ‹Âˆ^NˆŒ‹YYÚ]‹ˆ[ÛˆœÚÜ‹ˆYX\Žˆ›[Y\šXÈ‹ˆ‹‹ŠÚ][YHÈÈÝ\ŽˆŒ‹YYÚ]‹Z[]NˆŒ‹YYÚ]ˆHˆßJKˆJK™›Ü›X]
+]JNÂŸB‚™[˜Ý[ÛˆYÚ]ÓÛ›J˜[YJHÂˆ™]\›ˆÝš[™Ê˜[YHˆŠKœ™\XÙJ×ÙËˆŠNÂŸB‚™[˜Ý[Ûˆ›Ü›X[^™PÛœŠ˜[YJHÂˆ™]\›ˆÝš[™Ê˜[YHˆŠKÕ\\Ø\ÙJ
+Kœ™\XÙJÖ×KVŒNWKÙËˆŠNÂŸB‚™[˜Ý[Ûˆ˜[YSÜ“[
+˜[YJHÂˆÛÛœÝÛX[™YHÝš[™Ê˜[YHˆŠKš[J
+NÂˆ™]\›ˆÛX[™Y[ÂŸB‚™[˜Ý[Ûˆ›Ü›X]ÛœŠ˜[YJHÂˆÛÛœÝÚ\˜XÝ\œÈH›Ü›X[^™PÛœŠ˜[YJNÂˆYˆ
+Ú\˜XÝ\œË›[™ÝOOHM
+H™]\›ˆ˜[YHÓ”ˆ°èÛÈ[™›Ü›XYÈŽÂˆ™]\›ˆÚ\˜XÝ\œËœ™\XÙJ×ŠžÌŸJJžÌßJJžÌßJJžÍJJžÌŸJIË‰K‰‹‰ËÉIHŠNÂŸB‚™[˜Ý[Ûˆ\Õ˜[YÛœŠ˜[YJHÂˆÛÛœÝÚ\˜XÝ\œÈH›Ü›X[^™PÛœŠ˜[YJNÂˆYˆ
+K×–ÐKVŒNW^ÌLŸWÌŸIË\Ý
+Ú\˜XÝ\œÊH×ŠŠWJÉË\Ý
+Ú\˜XÝ\œÊJH™]\›ˆ˜[ÙNÂˆÛÛœÝ˜[Y\ÈHË‹‹˜Ú\˜XÝ\œ×K›X\
+
+Ú\˜XÝ\ŠHOˆÚ\˜XÝ\‹˜Ú\ÛÙP]
+
+HH
+NÂˆÛÛœÝØ[Ý[]QYÚ]H
+[™ÝÙZYÚÊHOˆÂˆÛÛœÝÝ[HH˜[Y\ËœÛXÙJ[™Ý
+Kœ™YXÙJ
+Ý[Ú\˜XÝ\‹[™^
+HOˆÝ[
+ÈÚ\˜XÝ\ˆ
+ˆÙZYÚÖÚ[™^K
+NÂˆÛÛœÝ™[XZ[™\ˆHÝ[H	HLNÂˆ™]\›ˆ™[XZ[™\ˆˆÈˆLHH™[XZ[™\ŽÂˆNÂˆÛÛœÝš\œÝHØ[Ý[]QYÚ]
+L‹ÍKË‹KË‹KË—JNÂˆÛÛœÝÙXÛÛ™HØ[Ý[]QYÚ]
+LËÍ‹KË‹KË‹KË—JNÂˆ™]\›ˆ[X™\ŠÚ\˜XÝ\œÖÌL—JHOOHš\œÝ	‰ˆ[X™\ŠÚ\˜XÝ\œÖÌL×JHOOHÙXÛÛ™ÂŸB‚™[˜Ý[Ûˆ›Ü›X]Û™J˜[YJHÂˆÛÛœÝYÚ]ÈHYÚ]ÓÛ›J˜[YJNÂˆYˆ
+YÚ]Ë›[™ÝOOHLJH™]\›ˆYÚ]Ëœ™\XÙJ×ŠÌŸJJÍ_JJÍJIËŠ	JH	‹IÈŠNÂˆYˆ
+YÚ]Ë›[™ÝOOHL
+H™]\›ˆYÚ]Ëœ™\XÙJ×ŠÌŸJJÍJJÍJIËŠ	JH	‹IÈŠNÂˆ™]\›ˆ˜[YH“°èÛÈ[™›Ü›XYÈŽÂŸB‚™[˜Ý[Ûˆ›Ü›X]ÛÜšÛØY
+˜[YJHÂˆÛÛœÝÝ\œÈH[X™\Š˜[YH
+NÂˆYˆ
+ZÝ\œÊH™]\›ˆØ\™ØHÜ°è\šXH°èÛÈ[™›Ü›XYHŽÂˆ™]\›ˆ	Û™]È[“[X™\‘›Ü›X]
+œP”ˆ‹ÈX^[][Qœ˜XÝ[Û‘YÚ]ÎˆˆJK™›Ü›X]
+Ý\œÊ_HÂŸB‚™[˜Ý[Ûˆ›Ü›X][Û™^J˜[YJHÂˆYˆ
+˜[YHOOH[˜[YHOOH[™Yš[™Y˜[YHOOHˆŠH™]\›ˆ“°èÛÈ[™›Ü›XYÈŽÂˆ™]\›ˆ™]È[“[X™\‘›Ü›X]
+œP”ˆ‹ÈÝ[Nˆ˜Ý\œ™[˜ÞH‹Ý\œ™[˜ÞNˆ”“ˆJK™›Ü›X]
+[X™\Š˜[YJJNÂŸB‚™[˜Ý[Ûˆ›Ü›X][Û
+˜[YJHÂˆYˆ
+]˜[YJH™]\›ˆÛÛ\]0ê›˜ÚXH°èÛÈ[™›Ü›XYHŽÂˆÛÛœÝ]HH™]È]J	ÔÝš[™Ê˜[YJKœÛXÙJÊ_KLMULŽŒŒ
+NÂˆYˆ
+[X™\‹š\Ó˜SŠ]K™Ù][YJ
+JJH™]\›ˆÛÛ\]0ê›˜ÚXH°èÛÈ[™›Ü›XYHŽÂˆÛÛœÝX™[H™]È[‘]U[YQ›Ü›X]
+œP”ˆ‹È[Ûˆ›Û™È‹YX\Žˆ›[Y\šXÈˆJK™›Ü›X]
+]JNÂˆ™]\›ˆX™[˜Ú\]
+
+KÕ\\Ø\ÙJ
+H
+ÈX™[œÛXÙJJNÂŸB‚™[˜Ý[Ûˆ›Ü›X]š[TÚ^™J˜[YJHÂˆÛÛœÝž]\ÈH[X™\Š˜[YH
+NÂˆYˆ
+Xž]\ÊH™]\›ˆ•[X[šÈ°èÛÈ[™›Ü›XYÈŽÂˆYˆ
+ž]\ÈL
+ˆL
+H™]\›ˆ	Û™]È[“[X™\‘›Ü›X]
+œP”ˆ‹ÈX^[][Qœ˜XÝ[Û‘YÚ]ÎˆHJK™›Ü›X]
+ž]\ÈÈL
+_HÐ˜Âˆ™]\›ˆ	Û™]È[“[X™\‘›Ü›X]
+œP”ˆ‹ÈX^[][Qœ˜XÝ[Û‘YÚ]ÎˆHJK™›Ü›X]
+ž]\ÈÈ
+L
+ˆL
+J_HP˜ÂŸB‚™[˜Ý[ÛˆÙ[XÝÜ[ÛœÊX™[ËÙ[XÝYHˆŠHÂˆ™]\›ˆØš™XÝ™[šY\ÊX™[ÊK›X\
+
+Ý˜[YKX™[JHOˆÜ[Ûˆ˜[YOH‰Ý˜[Y_Hˆ	Ý˜[YHOOHÙ[XÝYÈœÙ[XÝYˆˆˆŸO‰ÛX™[OÛÜ[Û˜
+Kš›Ú[ŠˆŠNÂŸB‚™[˜Ý[ÛˆÛÜšÙ›ÝÔ›ÙÜ™\ÜÊX™[ËÝ\œ™[Ý]\ÊHÂˆÛÛœÝ[šY\ÈHØš™XÝ™[šY\ÊX™[ÊK™š[\Š
+Ý˜[YWJHOˆVÈ˜Ø[˜Ù[Y‹œ™Z™XÝY‹Ú]˜]Ûˆ‹[[ÜÛÛ‹š\™Y—Kš[˜ÛY\Ê˜[YJJNÂˆÛÛœÝ›Ý[™[™^H[šY\Ë™š[™[™^
+
+Ý˜[YWJHOˆ˜[YHOOHÝ\œ™[Ý]\ÊNÂˆÛÛœÝÝ\œ™[[™^HÝ\œ™[Ý]\ÈOOHš\™YˆÈ[šY\Ë™š[™[™^
+
+Ý˜[YWJHOˆ˜[YHOOH˜\›Ý™YŠHˆ›Ý[™[™^Âˆ™]\›ˆ]ˆÛ\ÜÏHÛÜšÙ›ÝË\Ý\È‰Ù[šY\Ë›X\
+
+Ý˜[YKX™[K[™^
+HOˆÜ[ˆÛ\ÜÏHÛÜšÙ›ÝË\Ý\	Ú[™^Ý\œ™[[™^Èš\ËXÛÛ\]Hˆˆ[™^OOHÝ\œ™[[™^Èš\ËXÝ\œ™[ˆˆˆŸHO‰Ú[™^Ý\œ™[[™^È¸§$Èˆˆ[™^
+È_OÚOÛX[‰Ù\ØØ\R[
+X™[
+_OÜÛX[ÜÜ[˜
+Kš›Ú[ŠˆŠ_OÙ]˜ÂŸB‚™[˜Ý[Ûˆ›Ü›X]]U[YR[œ]
+˜[YJHÂˆYˆ
+]˜[YJH™]\›ˆˆŽÂˆÛÛœÝ]HH™]È]J˜[YJNÂˆYˆ
+[X™\‹š\Ó˜SŠ]K™Ù][YJ
+JJH™]\›ˆˆŽÂˆÛÛœÝØØ[H™]È]J]K™Ù][YJ
+HH]K™Ù][Y^›Û™SÙ™œÙ]
+
+H
+ˆŒ
+NÂˆ™]\›ˆØØ[ÒTÓÔÝš[™Ê
+KœÛXÙJMŠNÂŸB‚™[˜Ý[Ûˆ›ÙÜ™\ÜÔ\˜Ù[
+ÛÛ\]YÝ[
+HÂˆYˆ
+]Ý[
+H™]\›ˆÂˆ™]\›ˆX]›Z[ŠLX]œ›Ý[™
+
+ÛÛ\]YÈÝ[
+H
+ˆL
+JNÂŸB‚™[˜Ý[ÛˆÛÛ\XÝ^
+˜[YKX^HMÌ
+HÂˆÛÛœÝ^HÝš[™Ê˜[YHˆŠKœ™\XÙJ×ÊËÙËˆŠKš[J
+NÂˆ™]\›ˆ^›[™ÝˆX^È	Ý^œÛXÙJX^
+Kš[J
+_x )˜ˆ^ÂŸB‚™[˜Ý[Ûˆ\œÙTÛY\Ê˜[YJHÂˆ™]\›ˆÝš[™Ê˜[YHˆŠBˆœÜ]
+×—Ê‹KKWÊ—‹ÙÊBˆ›X\
+
+\[™^
+HOˆÂˆÛÛœÝ[™\ÈH\š[J
+KœÜ]
+—ˆŠNÂˆ™]\›ˆÈ]Nˆ[™\ËœÚY
+
+OËš[J
+HÛYH	Ú[™^
+È_X›ÙNˆ[™\Ëš›Ú[Š—ˆŠKš[J
+HNÂˆJBˆ™š[\Š
+ÛYJHOˆÛYK]HÛYK˜›ÙJNÂŸB‚™[˜Ý[ÛˆØY™R\›
+˜[YJHÂˆžHÂˆÛÛœÝ\›H™]ÈT“
+Ýš[™Ê˜[YHˆŠJNÂˆ™]\›ˆÈšˆ‹šÎˆ—Kš[˜ÛY\Ê\›œ›ÝØÛÛ
+HÈ\›ÔÝš[™Ê
+HˆˆŽÂˆHØ]ÚÂˆ™]\›ˆˆŽÂˆBŸB‚™[˜Ý[ÛˆY˜][šY]Ê›Ùš[HHÝ]Kœ›Ùš[JHÂˆYˆ
+\[Ùˆ›Ùš[HOOHœÝš[™ÈŠH™]\›ˆ›Ùš[HOOH˜ØY˜ÛWØYZ[ˆˆÈ›Ý™\šY]Èˆˆ›Ùš[HOOH˜ÛÛ\[žHˆÈ˜ÛÛ\[žKZÛYHˆˆœÝY[ZÛYHŽÂˆ™]\›ˆ˜]šYØ][Û’][\Ê›Ùš[JVÌOË–ÌH
+›Ùš[OËœ›ÛHOOH˜ÛÛ\[žHˆÈ˜ÛÛ\[žKZÛYHˆˆœÝY[ZÛYHŠNÂŸB‚™[˜Ý[ÛˆšY]Õ]JšY]ÊHÂˆÛÛœÝ]\ÈHÂˆÝ™\šY]ÎˆÈ•š\ðèÛÈÙ\˜[‹”Ú]XpéðèÛÈ™X[ÈÜ[—Kˆ\[[™\ÎˆÈÙ[˜[H\ÝZ\˜\È‹”›ØÙ\ÜÛÜÈHÜ\˜péðèÛÈÐQÓH—Kˆ\ÚÜÎˆÈ•\™Y˜\ÈH[™0ê›˜ÚX\È‹”™\ÜÛœðè]™Z\Ë˜^›ÜÈHÚXÚÛ\ÝÈ—Kˆ›ÝYšXØ][ÛœÎˆÈ“›ÝYšXØpéðíY\È‹]X[^˜péðíY\È\™XÚ[Û˜Y\È[ÈÙ]HXÙ\ÜÛÈ—Kˆ]]ÛX][ÛœÎˆÈ]]ÛXpéðíY\È‹[\\ËØÝ[Y[ÜÈHÛÛ][šXØpéðíY\È—KˆÛÛ\[šY\ÎˆÈ‘[\™\Ø\È‹”\˜ÙZ\›ÜÈš[˜Ý[YÜÈ[ÜÈ\™[™^™\È—Kˆ\™[XÙ\ÎˆÈ’›Ý™[œÈÈ\™[™^™\È‹ØY\Ý›ÈÙ[˜[ÜÈ›Ý™[œÈ—KˆYZ\ÜÚ[ÛœÎˆÈYZ\ÜðíY\È‹‘ØÝ[Y[ÜËÛÛ˜]ÜÈH[°ëXÚ[ÈÈ›Ý™[H—KˆÛÛ˜XÝÎˆÈÛÛ˜]ÜÈ‹•šYðê›˜ÚXK™[˜Ú[Y[ÜÈH°ë[˜Ý[ÜÈ—KˆX]™\ÎˆÈ‘°ê\šX\ÈHY˜\Ý[Y[ÜÈ‹ÛÛ›ÛHH]\ÈH›ÝšY0ê›˜ÚX\È—Kˆ\›Z[˜][ÛœÎˆÈ‘\ÛYØ[Y[ÜÈ‹”›ØÙ\ÜÛÜËØÝ[Y[ÜÈH\Ý0ìÜšXÛÈ—Kˆ\œÛÛ›™[ˆÈ‘\\[Y[È\ÜÛØ[‹ÚXÛÈYZ[š\Ý˜]]›ÈÜÈ›Ý™[œÈ—Kˆš[˜[˜ÙNˆÈ‘š[˜[˜ÙZ\›È‹ÛØœ˜[°éØ\Ë›Û]ÜÈH™XÙXš[Y[ÜÈ—KˆØÝ[Y[ÎˆÈ‘ØÝ[Y[ÜÈ‹\œ]Z]›ÈYÚ][š]˜YÈHÐQÓH—KˆXØÛÝ[[™ÎˆÈÛÛXš[YYH‹‘[š[ÜË™]Ü››ÜÈHÛÛ™™\°ê›˜ÚXH—Kˆ›ØÙY\™\ÎˆÈ”›ØÙY[Y[ÜÈ‹”›ØÙ\ÜÛÜË™\ÜÛœðè]™Z\ÈH˜^›ÜÈ—Kˆ[ÜNˆÈ”\ÜÛØ\ÈHÛÛš]\È‹XÙ\ÜÛÜÈÜšXYÜÈ[HÐQÓH—KˆÛÝ\œÙ\ÎˆÈÝ\œÛÜÈ‹‘›Ü›XpéðíY\Ë][\ÈH]]šYY\È—Kˆ˜ÛÝ\œÙKYY]ÜˆŽˆÈ‘Y]ÜˆÈÝ\œÛÈ‹ÛÛpî™ÈYYðìÙÚXÛÈ—Kˆ›\ÜÛÛ‹YY]ÜˆŽˆÈ‘\Ý]\˜HH][H‹“[š\ÈH\™[™^˜YÙ[H—Kˆ[œ›ÛY[ÎˆÈ“X]°ëXÝ[\È‹•°ë[˜Ý[ÜÈ[™H›Ý™[œÈHÝ\œÛÜÈ—Kˆ]Y]ˆÈ]Y]ÜšXH‹’\Ý0ìÜšXÛÈ\ÈpéðíY\È›ÈÜ[—Kˆ[™XØ]ÜœÎˆÈ’[™XØYÜ™\ÈH™[]0ìÜš[ÜÈ‹‘YÜÈ™XZ\È\˜H\ÚX\ˆHÙ\Ý0èÛÈ—KˆœÝY[ZÛYHŽˆÈ’[°ëXÚ[È‹”ÝXH›Ü›XpéðèÛÈ›ÈÜ[ÐQÓH—KˆœÝY[XÛÝ\œÙ\ÈŽˆÈ“Y]\ÈÝ\œÛÜÈ‹ÛÛpî™ÜÈX™\˜YÜÈ[HÐQÓH—KˆœÝY[XXÝ]š]Y\ÈŽˆÈ]]šYY\È‹XÛÛ\[šHÙ]\È[š[ÜÈ—KˆœÝY[XÛÝ\œÙHŽˆÈÝ\œÛÈ‹][\ÈH]]šYY\È—Kˆ˜ÛÛ\[žKZÛYHŽˆÈ•š\ðèÛÈÙ\˜[‹”›ÙÜ™\ÜÛÈÜÈ›Ý™[œÈHÝXH[\™\ØH—Kˆ˜ÛÛ\[žKX\™[XÙ\ÈŽˆÈ\™[™^™\È‹’›Ý™[œÈš[˜Ý[YÜÈ0èÝXH[\™\ØH—KˆNÂˆ™]\›ˆ]\ÖÝšY]×HÈ”Ü[ÐQÓH‹\™[™^˜YÙ[H—NÂŸB‚™[˜Ý[Ûˆœ˜[™
+[™\œÙHH˜[ÙJHÂˆ™]\›ˆÜ[ˆÛ\ÜÏH˜œ˜[™	Ú[™\œÙHÈ˜œ˜[™Z[™\œÙHˆˆˆŸH‚ˆÜ[ˆÛ\ÜÏH˜œ˜[™[X\šÈÐOÜÜ[‚ˆÜ[ˆÛ\ÜÏH˜œ˜[™XÛÜHÝ›Û™Ï”Ü[ÐQÓOÜÝ›Û™ÏÛX[\™[™^˜YÙ[H›Ùš\ÜÚ[Û˜[ÜÛX[ÜÜ[‚ˆÜÜ[˜ÂŸB‚™[˜Ý[ÛˆÙ]\ÞJ›Ü›K\ÞKX™[H”›ØÙ\ÜØ[™Ë‹‹ˆŠHÂˆÛÛœÝ]ÛˆH›Ü›OËœ]Y\žTÙ[XÝÜŠ	Ø]Û–Ý\OHœÝX›Z]—IÊNÂˆYˆ
+X]ÛŠH™]\›ŽÂˆYˆ
+\ÞJHÂˆ]Û‹™]\Ù]›ÜšYÚ[˜[X™[H]Û‹š[›™\’SÂˆ]Û‹™\ØX›YHYNÂˆ]Û‹^ÛÛ[HX™[ÂˆH[ÙHÂˆ]Û‹™\ØX›YH˜[ÙNÂˆ]Û‹š[›™\’SH]Û‹™]\Ù]›ÜšYÚ[˜[X™[ÛÛ[X\ˆŽÂˆBŸB‚™[˜Ý[ÛˆÚÝÕØ\Ý
+Y\ÜØYÙK\HHœÝXØÙ\ÜÈŠHÂˆÛÛœÝØ\ÝHØÝ[Y[œ]Y\žTÙ[XÝÜŠˆÝØ\ÝŠNÂˆYˆ
+]Ø\Ý
+H™]\›ŽÂˆØ\Ý^ÛÛ[HY\ÜØYÙNÂˆØ\Ý˜Û\ÜÓ˜[YHHØ\ÝÚÝÈ	Ý\_XÂˆÚ[™ÝË˜ÛX\•[Y[Ý]
+ÚÝÕØ\Ý[Y\ŠNÂˆÚÝÕØ\Ý[Y\ˆHÚ[™ÝËœÙ][Y[Ý]
+
+
+HOˆØ\Ý˜Û\ÜÓ\Ýœ™[[Ý™JœÚÝÈŠKÎ
+NÂŸB‚™[˜Ý[ÛˆœšY[™Q\œ›ÜŠ\œ›ÜŠHÂˆÛÛœÝY\ÜØYÙHHÝš[™Ê\œ›ÜË›Y\ÜØYÙHˆŠNÂˆYˆ
+\œ›ÜË˜ÛÙHOOHŒŒÍLHˆ	‰ˆY\ÜØYÙKš[˜ÛY\Ê˜ÛÛ\[šY\×ØÛœ—Ý[š\]YWÚYŠJH™]\›ˆ’°èH^\ÝH[XH[\™\ØHØY\Ý˜YHÛÛH\ÝHÓ”‹ˆŽÂˆYˆ
+\œ›ÜË˜ÛÙHOOHŒŒÍLMŠH™]\›ˆ”™]š\ÙHÜÈYÜÈ[™›Ü›XYÜÎˆ[HÜÈØ[\ÜÈ\Ý0èH›Ü˜HÈ›Ü›X]È\›Z]YËˆŽÂˆYˆ
+Y\ÜØYÙKÓÝÙ\Ø\ÙJ
+Kš[˜ÛY\Ê™˜Z[YÈ™]ÚŠJH™]\›ˆ“°èÛÈ›ÚHÜÜðë]™[ÛÛ™XÝ\ˆ[ÈÙ\špéÛËˆ™\šYš\]YHÝXH[\›™]H[H›Ý˜[Y[KˆŽÂˆ™]\›ˆY\ÜØYÙH“°èÛÈ›ÚHÜÜðë]™[ÛÛ˜ÛZ\‹ˆŽÂŸB‚™[˜Ý[ÛˆÚÝÑ›Ü›Q\œ›ÜŠ›Ü›KY\ÜØYÙJHÂˆ›Ü›OËœ]Y\žTÙ[XÝÜŠ‹™›Ü›KY\œ›ÜˆŠOËœ™[[Ý™J
+NÂˆYˆ
+Y›Ü›JH™]\›ŽÂˆÛÛœÝ[\HØÝ[Y[˜Ü™X]Q[[Y[
+™]ˆŠNÂˆ[\˜Û\ÜÓ˜[YHH™›Ü›KY\œ›ÜˆŽÂˆ[\œÙ]]šX]Jœ›ÛH‹˜[\ŠNÂˆ[\^ÛÛ[HY\ÜØYÙNÂˆ›Ü›Kœ™\[™
+[\
+NÂŸB‚™[˜Ý[Ûˆ™[™\›ÛÝ
+
+HÂˆ\š[›™\’SHXZ[ˆÛ\ÜÏH˜›ÛÝÜ[ˆÛ\ÜÏH˜œ˜[™[X\šÈÐOÜÜ[]ˆÛ\ÜÏHœÜ[›™\ˆÙ]”™\\˜[™ÈÈÜ[ÐQÓK‹‹ÜÛXZ[˜ÂŸB‚˜\Þ[˜È[˜Ý[ÛˆØ[YZ[Š^[ØY]][XØ]YH˜[ÙJHÂˆÛÛœÝXY\œÈHÂˆÛÛ[U\HŽˆ˜\XØ][Û‹ÚœÛÛˆ‹ˆ\ZÙ^NˆÕTPTÑWÒÑVKˆNÂˆYˆ
+]][XØ]Y
+HÂˆÛÛœÝÈ]HHH]ØZ]Ý\X˜\ÙK˜]]™Ù]Ù\ÜÚ[ÛŠ
+NÂˆYˆ
+Y]KœÙ\ÜÚ[ÛË˜XØÙ\Ü×ÝÚÙ[ŠH›ÝÈ™]È\œ›ÜŠ”ÝXHÙ\ÜðèÛÈ^\›ÝKˆ[™H›Ý˜[Y[KˆŠNÂˆXY\œË]]Üš^˜][ÛˆH™X\™\ˆ	Ù]KœÙ\ÜÚ[Û‹˜XØÙ\Ü×ÝÚÙ[ŸXÂˆBˆÛÛœÝ™\ÜÛœÙHH]ØZ]™]Ú
+QRS—Ñ•SÕSÓ‹ÂˆY]Ùˆ”ÔÕ‹ˆXY\œËˆ›ÙNˆ”ÓÓ‹œÝš[™ÚYžJ^[ØY
+KˆJNÂˆÛÛœÝ›ÙHH]ØZ]™\ÜÛœÙKšœÛÛŠ
+K˜Ø]Ú
+
+
+HOˆ
+ßJJNÂˆYˆ
+\™\ÜÛœÙK›ÚÊHÂˆÛÛœÝ\œ›ÜˆH™]È\œ›ÜŠ›ÙK™\œ›Üˆ“°èÛÈ›ÚHÜÜðë]™[ÛÛ˜ÛZ\ˆHÜ\˜péðèÛËˆŠNÂˆ\œ›Ü‹˜ÛÙHH›ÙK˜ÛÙH[Âˆ5ÓÞýâÚ$z{-®éÜj×= { apprentice_id: values.apprenticeId, company_id: values.companyId, target_start_date: values.targetStartDate || null, status: values.status || "approved", notes: String(values.notes || "").trim() };
       let admissionId = id;
       if (id) {
         const { error } = await supabase.from("admission_cases").update(payload).eq("id", id);

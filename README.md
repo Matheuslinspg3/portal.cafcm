@@ -21,6 +21,14 @@ Portal real de aprendizagem, acompanhamento e operação dos programas de jovens
 - **Acadêmico:** cursos, aulas, linhas de aprendizagem, atividades, matrículas e progresso.
 - **Gestão:** pessoas, convites, credenciais e auditoria.
 
+## Importação do Airtable
+
+A base importada permanece vinculada ao Portal por identificadores de origem. Empresas são consolidadas pelo CNPJ; jovens e contratos importados ficam no cadastro separado **Cadastro sem acesso** até que o e-mail seja conferido.
+
+O campo de origem chamado **Email Aprendiz** trouxe valores de escolaridade, não endereços de e-mail. Esses valores ficam preservados para revisão, nenhum convite é enviado automaticamente e nenhuma conta fictícia é criada. Os contratos mantêm empresa, CPF, datas, jornada, curso e horário, com os vínculos protegidos por RLS.
+
+As tabelas `apprentice_registry` e `apprentice_contract_registry` possuem políticas para a equipe CAFCM e para representantes da empresa, limitadas à empresa correspondente. A rotina é idempotente por identificador do Airtable e registra a importação na auditoria.
+
 ## Automações da Fase 4
 
 A rotina é executada a cada hora e também pode ser atualizada manualmente por uma pessoa da equipe. Ela identifica vencimentos e falta de andamento em contratos, documentos, cobranças, recrutamento, desligamentos, férias, afastamentos e atividades acadêmicas. Os alertas são direcionados ao departamento responsável e não são duplicados a cada execução.
@@ -152,6 +160,8 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 20. `supabase/migrations/20260911030417_phase_four_automations.sql`
 21. `supabase/migrations/20260911032000_phase_four_hardening.sql`
 22. `supabase/migrations/20260911152640_phase_five_indicators.sql`
+23. `supabase/migrations/20260913201213_airtable_import_registry.sql`
+24. `supabase/migrations/20260913203317_tighten_import_registry_policies.sql`
 
 Os testes transacionais de banco estão em `supabase/tests/` e podem ser executados com `supabase test db` em um ambiente local do Supabase.
 
@@ -167,13 +177,3 @@ Revise os scripts antes de aplicá-los a uma base que já possui dados. A base C
 - Contas de empresa ficam vinculadas à empresa correspondente.
 - Ações relevantes são registradas na auditoria.
 - Arquivos `.env` e dados locais da Vercel são ignorados pelo Git.
-
-## Arquitetura de Navegação
-
-A navegação foi recentemente refatorada para utilizar um roteador no lado do cliente (Client-Side Router) que suporta a **History API**. Isso permite:
-
-- **URLs reais e compartilháveis**: Cada aba e subaba possui uma URL única (ex: `/vagas`, `/vagas/candidatos`).
-- **Deep Links**: Links diretos para itens específicos (ex: `/cursos?id=abc`).
-- **Sidebar Dinâmica e Responsiva**: Componente de sidebar extraído, com suporte a visualização compacta (salva via `localStorage`), acordeões (accordion) com agrupamento de opções, e expansão automática baseada na rota ativa.
-- **Histórico do Navegador**: As setas de "Voltar" e "Avançar" do navegador resolvem a aba corretamente utilizando os eventos `popstate`.
-- **Roteamento Desacoplado**: O mapa de rotas encontra-se em `src/router/routes.mjs`, e a lógica do roteador em `src/router/router.mjs`. Para adicionar uma rota futura, basta incluí-la no `routeMap` e, se necessário, mapeá-la de volta via `viewToUrl`.
