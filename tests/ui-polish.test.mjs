@@ -50,13 +50,15 @@ test("sidebar segue a hierarquia funcional atual", () => {
   assert.match(app, /\["personnel", "Folha e Ponto", "clock", \{ route: "\/folha" \}\]/);
   assert.match(app, /\["accounting", "eSocial \/ Obriga[cç][oõ]es", "mail", \{ route: "\/esocial" \}\]/);
   assert.match(app, /label: "Financeiro"/);
-  assert.match(app, /\["finance", "Faturamento", "calendar", \{ route: "\/faturamento", children:/);
-  assert.match(app, /\["finance", "Geração em lote", "copy"/);
+  assert.match(app, /\["notes", "Notas", "copy", \{ route: "\/notas" \}\]/);
+  assert.match(app, /\["finance", "Custos Operacionais", "arrow", \{ route: "\/despesas" \}\]/);
+  assert.doesNotMatch(app, /label: "Notas de faturamento"/);
+  assert.doesNotMatch(app, /children:\s*\[/);
   assert.match(app, /label: "Pedagógico"/);
   assert.match(app, /\["automations", "Automações", "clock"\]/);
   assert.deepEqual(Array.from(admin.find((group) => group.label === "Recursos Humanos").items, ([,, , meta]) => meta?.route), ["/rh", "/vagas", "/vagas/candidatos", "/vagas/processos-seletivos"]);
   assert.deepEqual(Array.from(admin.find((group) => group.label === "Departamento Pessoal").items, ([, label]) => label), ["Visão Geral", "Admissões", "Contratos", "Folha e Ponto", "Férias e Afastamentos", "Rescisões", "eSocial / Obrigações"]);
-  assert.deepEqual(Array.from(admin.find((group) => group.label === "Financeiro").items, ([, label]) => label), ["Visão Geral", "Faturamento", "Despesas", "Boletos e Recebimentos"]);
+  assert.deepEqual(Array.from(admin.find((group) => group.label === "Financeiro").items, ([, label]) => label), ["Visão Geral", "Notas", "Custos Operacionais", "Boletos e Recebimentos"]);
 });
 
 test("guardrails evitam overflow horizontal no financeiro e no frame", () => {
