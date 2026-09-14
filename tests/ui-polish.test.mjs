@@ -61,6 +61,18 @@ test("sidebar segue a hierarquia funcional atual", () => {
   assert.deepEqual(Array.from(admin.find((group) => group.label === "Financeiro").items, ([, label]) => label), ["Visão Geral", "Notas", "Custos Operacionais", "Boletos e Recebimentos"]);
 });
 
+test("financeiro mantém Notas como página com cards internos", () => {
+  assert.match(app, /async function renderNotes\(content\)/);
+  for (const label of ["Notas de faturamento", "Notas recorrentes", "Geração em lote", "Regras padrão", "Histórico"]) {
+    assert.match(app, new RegExp(label));
+  }
+  assert.match(app, /Gerencie suas notas fiscais/);
+  assert.match(app, /Começar agora/);
+  assert.match(app, /As funcionalidades de notas ajudam/);
+  assert.match(app, /\["notes", "Notas", "copy", \{ route: "\/notas" \}\]/);
+  assert.doesNotMatch(app, /label: "Notas"[^]*children:/);
+});
+
 test("guardrails evitam overflow horizontal no financeiro e no frame", () => {
   assert.match(styles, /html,\s*body \{ max-width: 100%; overflow-x: hidden; \}/);
   assert.match(styles, /\.portal-main,\s*\.topbar,\s*\.content,[\s\S]*max-width: 100%/);
