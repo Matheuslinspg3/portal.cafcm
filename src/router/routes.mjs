@@ -38,6 +38,7 @@ export const routeMap = {
   "/esocial": { view: "accounting", title: "eSocial / Obrigações" },
 
   "/financeiro": { view: "finance", title: "Financeiro", tab: "receivable" },
+  "/notas": { view: "notes", title: "Notas" },
   "/faturamento": { view: "finance", title: "Faturamento", tab: "receivable" },
   "/despesas": { view: "finance", title: "Despesas", tab: "payable" },
   "/boletos": { view: "finance", title: "Boletos", tab: "billets" },
@@ -76,6 +77,7 @@ export const viewToUrl = {
   "enrollments": "/matriculas",
   "personnel": "/dp",
   "finance": "/financeiro",
+  "notes": "/notas",
   "documents": "/documentos",
   "accounting": "/contabilidade",
   "procedures": "/procedimentos",
