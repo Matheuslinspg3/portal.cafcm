@@ -1913,10 +1913,16 @@ async function renderFinance(content) {
     const receivedAmount = received.reduce((a, b) => a + Number(b.paid_amount ?? b.amount ?? 0), 0);
     const overdueAmount = overdueCharges.reduce((a, b) => a + Number(b.amount || 0), 0);
 
+    // Fetch handoff tasks dynamically for the Finance attention area
+    const { data: financeTasks } = await supabase.from("tasks").select("id,title,description,status").eq("category", "finance").not("status", "in", "(completed,cancelled)");
+
     const attention = [];
     if (overdueCharges.length) attention.push([`${overdueCharges.length} cobranças vencidas`, "Verifique pendências e faça contato", "receivable"]);
     if (overduePayables.length) attention.push([`${overduePayables.length} despesas vencidas`, "Acesse contas a pagar", "payable"]);
-    // Could add more attention items (e.g. handoffs)
+
+    if (financeTasks && financeTasks.length) {
+      attention.push([`${financeTasks.length} solicitações de handoff pendentes`, "Acesse a aba de Tarefas para analisar as atualizações de Admissão, Folha e Rescisão repassadas pelo DP.", "tasks"]);
+    }
 
     body = `
       <section class="metric-grid">
@@ -1932,13 +1938,15 @@ async function renderFinance(content) {
       </section>
     `;
   } else if (state.financeTab === "recurring") {
-    body = `<section class="card"><div class="people-list finance-list">${recurring.length ? recurring.map((item) => { return `<article class="person-row finance-row"><span class="avatar">${icon("clock")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · Venc. ${item.due_day}</small></div><div class="finance-amount"><small>Regra</small><strong>${item.value_rule === "fixed" ? formatMoney(item.fixed_amount) : item.value_rule === "per_apprentice" ? "Por Jovem" : "% Folha"}</strong></div><div class="person-access"><span class="status status-draft">${item.is_active ? "Ativa" : "Inativa"}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-recurring="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma recorrência", "Crie regras de faturamento contínuo.", canManage ? `<button class="btn btn-primary" data-dialog="recurring-charge">Nova regra</button>` : "")}</div></section>`;
+    body = `
+      ${canManage ? `<section class="card"><div class="card-head"><div><span class="eyebrow">Ações em Lote</span><h2>Gerar Lançamentos</h2></div></div><div class="form-grid two-columns" style="padding: 1rem;"><label>Competência<input type="month" id="batch-competence" value="${state.financeMonth}"/></label><button class="btn btn-secondary" data-preview-batch style="align-self: end; margin-bottom: 1rem;">Visualizar Prévia</button></div></section>` : ""}
+      <section class="card"><div class="card-head"><div><h2>Regras Ativas</h2></div></div><div class="people-list finance-list">${recurring.length ? recurring.map((item) => { return `<article class="person-row finance-row"><span class="avatar">${icon("clock")}</span><div class="person-main"><strong>${item.charge_type === "payable" ? escapeHtml(item.supplier_name) : escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · Venc. ${item.due_day} ${item.charge_type === "payable" ? "(Despesa)" : "(Faturamento)"}</small></div><div class="finance-amount"><small>Regra</small><strong>${item.value_rule === "fixed" ? formatMoney(item.fixed_amount) : item.value_rule === "per_apprentice" ? "Por Jovem" : "% Folha"}</strong></div><div class="person-access"><span class="status status-draft">${item.is_active ? "Ativa" : "Inativa"}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-recurring="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma recorrência", "Crie regras de faturamento contínuo.", canManage ? `<button class="btn btn-primary" data-dialog="recurring-charge">Nova regra</button>` : "")}</div></section>`;
   } else if (state.financeTab === "billets") {
     body = `<section class="card"><div class="card-head"><div><h2>Visão unificada de Boletos</h2></div></div>${emptyState("Gerenciamento de boletos", "Consolide recebimentos e baixas manuais nesta visão.")}</section>`;
   } else if (state.financeTab === "bank") {
     body = `<section class="card"><div class="card-head"><div><h2>Integração Bancária</h2></div></div>${emptyState("Ambiente Sandbox", "O ambiente de integração encontra-se em testes.")}</section>`;
   } else if (state.financeTab === "receivable") {
-    body = `<section class="metric-grid">${metric("A receber", formatMoney(openCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overdueCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Recebido", formatMoney(received.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Cobranças", charges.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar empresa, cobrança, NF ou boleto" aria-label="Buscar cobranças" /></label><select data-finance-filter="status" aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(financialStatusLabels, state.financeStatus)}</select><select data-finance-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.financeCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${hasChargeFilters ? `<button class="btn btn-small btn-quiet" data-clear-finance-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredCharges.length ? filteredCharges.map((item) => { const isLate = !["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${formatMonth(item.competence)} · vence ${item.due_date ? formatDate(item.due_date) : "sem data"}${item.invoice_number ? ` · NF ${item.invoice_number}` : ""}${item.payment_slip_number ? ` · boleto ${item.payment_slip_number}` : ""}`; const status = isLate ? "Vencido — atualizar" : financialStatusLabels[item.status] || item.status; return `<article class="person-row finance-row"><span class="avatar">${icon(isLate ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · ${escapeHtml(detail)}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-financial-charge="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma cobrança encontrada", hasChargeFilters ? "Altere os filtros para localizar outro registro." : "Cadastre a primeira cobrança para iniciar o controle financeiro.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">Nova cobrança</button>` : "")}</div></section>`;
+    body = `<section class="metric-grid">${metric("A receber", formatMoney(openCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overdueCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Recebido", formatMoney(received.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Cobranças", charges.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar empresa, cobrança, NF ou boleto" aria-label="Buscar cobranças" /></label><select data-finance-filter="status" aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(financialStatusLabels, state.financeStatus)}</select><select data-finance-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.financeCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${hasChargeFilters ? `<button class="btn btn-small btn-quiet" data-clear-finance-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredCharges.length ? filteredCharges.map((item) => { const isLate = !["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${formatMonth(item.competence)} · vence ${item.due_date ? formatDate(item.due_date) : "sem data"}${item.invoice_number ? ` · NF ${item.invoice_number}` : ""}${item.payment_slip_number ? ` · boleto ${item.payment_slip_number}` : ""}`; const status = isLate ? "Vencido — atualizar" : financialStatusLabels[item.status] || item.status; return `<article class="person-row finance-row"><span class="avatar">${icon(isLate ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · ${escapeHtml(detail)}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span></div><div class="person-actions">${canManage ? `${item.status !== "paid" ? `<button class="btn btn-small btn-primary" data-pay-charge="${item.id}">Pagar</button>` : ""}<button class="btn btn-small btn-secondary" data-edit-financial-charge="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma cobrança encontrada", hasChargeFilters ? "Altere os filtros para localizar outro registro." : "Cadastre a primeira cobrança para iniciar o controle financeiro.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">Nova cobrança</button>` : "")}</div></section>`;
   } else if (state.financeTab === "payable") {
     body = `<section class="metric-grid">${metric("A pagar", formatMoney(openPayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overduePayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Pago", formatMoney(paidPayables.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Contas", payables.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar fornecedor, despesa ou referência" aria-label="Buscar contas a pagar" /></label><select data-payable-filter aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(payableStatusLabels, state.payableStatus)}</select>${state.financeSearch || state.payableStatus ? `<button class="btn btn-small btn-quiet" data-clear-payable-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredPayables.length ? filteredPayables.map((item) => { const late = !["paid", "cancelled"].includes(item.status) && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${escapeHtml(item.category)} · vence ${formatDate(item.due_date)}${item.planned_payment_date ? ` · previsto para ${formatDate(item.planned_payment_date)}` : ""}${item.payment_method === "bradesco" ? " · Bradesco (manual)" : ""}`; return `<article class="person-row finance-row"><span class="avatar">${icon(late ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(item.supplier_name)}</strong><small>${escapeHtml(item.description)} · ${detail}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(late ? "Vencida — atualizar" : payableStatusLabels[item.status] || item.status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-payable="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma conta a pagar encontrada", "Cadastre fornecedores, despesas, vencimentos e responsáveis para manter os avisos centralizados.", canManage ? `<button class="btn btn-primary" data-dialog="payable">Nova conta a pagar</button>` : "")}</div></section>`;
   }
@@ -2968,7 +2976,9 @@ async function openDialog(type, recordId = null) {
       body = `<form id="recurring-form" class="dialog-form wide-form">
         <input type="hidden" name="id" value="${escapeHtml(item.id || "")}" />
         <div class="form-grid two-columns">
-          <label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label>
+          <label>Empresa (Faturamento)<select name="companyId"><option value="">Nenhuma (se for Despesa)</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label>
+          <label>Fornecedor (Despesa fixada)<input name="supplierName" maxlength="200" value="${escapeHtml(item.supplier_name || "")}" /></label>
+          <label>Tipo<select name="chargeType">${selectOptions({receivable: "Faturamento (Receber)", payable: "Custo Fixo (Pagar)"}, item.charge_type || "receivable")}</select></label>
           <label>Descrição Padrão<input name="description" required maxlength="240" value="${escapeHtml(item.description || "")}" /></label>
           <label>Regra de Valor<select name="valueRule">${selectOptions(rules, item.value_rule || "fixed")}</select></label>
           <label>Valor Fixo (se aplicável)<input name="fixedAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.fixed_amount || "")}" /></label>
@@ -3472,6 +3482,29 @@ app.addEventListener("click", async (event) => {
     else if (state.vacancyTab === "processes") pushRoute("/vagas/processos-seletivos");
     else pushRoute("/vagas");
     return;
+  }
+  if (target.hasAttribute("data-pay-charge")) {
+    const id = target.getAttribute("data-pay-charge");
+    const amount = window.prompt("Digite o valor pago:");
+    if (!amount) return;
+    const { error } = await supabase.from("financial_charges").update({ status: "paid", paid_at: new Date().toISOString(), paid_amount: amount }).eq("id", id);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Cobrança marcada como paga.");
+    return renderView();
+  }
+  if (target.hasAttribute("data-pay-payable")) {
+    const id = target.getAttribute("data-pay-payable");
+    const amount = window.prompt("Digite o valor pago:");
+    if (!amount) return;
+    const { error } = await supabase.from("accounts_payable").update({ status: "paid", paid_at: new Date().toISOString(), paid_amount: amount }).eq("id", id);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Despesa marcada como paga.");
+    return renderView();
+  }
+  if (target.hasAttribute("data-preview-batch")) {
+    const competenceInput = document.getElementById("batch-competence");
+    if (!competenceInput || !competenceInput.value) return showToast("Selecione a competência para a prévia.", "error");
+    return openBatchPreview(competenceInput.value);
   }
   if (target.dataset.documentTab) {
     state.documentTab = target.dataset.documentTab;
@@ -4588,7 +4621,7 @@ app.addEventListener("submit", async (event) => {
 
     if (form.id === "recurring-form") {
       const id = String(values.id || "");
-      const payload = { company_id: values.companyId, description: String(values.description || "").trim(), value_rule: values.valueRule, fixed_amount: valueOrNull(values.fixedAmount), due_day: Number(values.dueDay), is_active: values.isActive === "true", start_date: values.startDate, end_date: values.endDate || null };
+      const payload = { charge_type: values.chargeType, company_id: values.companyId || null, supplier_name: valueOrNull(values.supplierName), description: String(values.description || "").trim(), value_rule: values.valueRule, fixed_amount: valueOrNull(values.fixedAmount), due_day: Number(values.dueDay), is_active: values.isActive === "true", start_date: values.startDate, end_date: values.endDate || null };
       if (payload.end_date && new Date(`${payload.end_date}T00:00:00`) < new Date(`${payload.start_date}T00:00:00`)) throw new Error("A data de término não pode ser anterior ao início.");
       const { error } = id ? await supabase.from("recurring_charges").update(payload).eq("id", id) : await supabase.from("recurring_charges").insert({ ...payload, created_by: state.profile.id });
       if (error) throw error;
@@ -5102,3 +5135,99 @@ async function init() {
 }
 
 init();
+
+async function openBatchPreview(month) {
+  const competenceDate = `${month}-01`;
+  const { data: recurring, error } = await supabase.from("recurring_charges").select("*").eq("is_active", true).lte("start_date", `${month}-31`);
+  if (error) {
+    showToast("Não foi possível carregar as regras.", "error");
+    return;
+  }
+  const activeRules = recurring.filter(r => !r.end_date || r.end_date >= competenceDate);
+  if (!activeRules.length) return showToast("Nenhuma regra ativa para esta competência.", "error");
+
+  const dialog = document.createElement("dialog");
+  dialog.className = "dialog slide-dialog";
+  dialog.innerHTML = `<div class="dialog-content">
+    <div class="dialog-head"><h2>Prévia do Lote: ${formatMonth(competenceDate)}</h2><button type="button" class="icon-btn" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
+    <div class="dialog-body">
+      <p>Verifique os lançamentos que serão gerados. Eles serão salvos como rascunhos para emissão posterior.</p>
+      <form id="batch-generate-form">
+        <input type="hidden" name="competence" value="${competenceDate}">
+        <div class="people-list">
+          ${activeRules.map((rule, idx) => `
+            <div class="card" style="padding: 1rem; margin-bottom: 0.5rem; display: grid; gap: 0.5rem;">
+               <input type="hidden" name="rule-${idx}-id" value="${rule.id}">
+               <input type="hidden" name="rule-${idx}-type" value="${rule.charge_type}">
+               <label><input type="checkbox" name="rule-${idx}-include" checked> <strong>Incluir ${escapeHtml(rule.description)}</strong></label>
+               <div style="display: flex; gap: 1rem;">
+                 <label>Vencimento (Dia ${rule.due_day})<input type="date" name="rule-${idx}-due" value="${month}-${String(rule.due_day).padStart(2, '0')}" required></label>
+                 <label>Valor (R$)<input type="number" step="0.01" name="rule-${idx}-amount" value="${rule.value_rule === 'fixed' ? rule.fixed_amount : 0}" required></label>
+               </div>
+            </div>
+          `).join("")}
+        </div>
+        <button class="btn btn-primary btn-block" style="margin-top: 1rem;">Gerar Lançamentos</button>
+      </form>
+    </div>
+  </div>`;
+  document.getElementById("overlay-root").appendChild(dialog);
+  dialog.showModal();
+}
+
+app.addEventListener("submit", async (event) => {
+  if (event.target.id === "batch-generate-form") {
+    event.preventDefault();
+    setBusy(event.target, true);
+    try {
+      const formData = new FormData(event.target);
+      const competence = formData.get("competence");
+      let count = 0;
+      let i = 0;
+
+      const { data: batch, error: batchError } = await supabase.from("charge_batches").insert({ competence, status: "generated" }).select("id").single();
+      if (batchError && batchError.code !== "23505") throw batchError; // 23505 is unique violation, meaning batch exists
+
+      // If batch exists, fetch its ID
+      let batchId = batch?.id;
+      if (!batchId) {
+         const { data: extBatch } = await supabase.from("charge_batches").select("id").eq("competence", competence).single();
+         batchId = extBatch?.id;
+      }
+
+      while (formData.has(`rule-${i}-id`)) {
+        const include = formData.get(`rule-${i}-include`);
+        if (include) {
+          const ruleId = formData.get(`rule-${i}-id`);
+          const chargeType = formData.get(`rule-${i}-type`);
+          const amount = formData.get(`rule-${i}-amount`);
+          const due = formData.get(`rule-${i}-due`);
+
+          const { data: rule } = await supabase.from("recurring_charges").select("company_id, supplier_name, description").eq("id", ruleId).single();
+
+          if (chargeType === "receivable") {
+            const { error: insertErr } = await supabase.from("financial_charges").insert({
+              recurring_charge_id: ruleId, competence, batch_id: batchId, company_id: rule.company_id, description: rule.description, amount, due_date: due, status: "to_invoice"
+            });
+            // ignore unique constraints (already generated)
+            if (!insertErr) count++;
+          } else {
+            const { error: insertErr } = await supabase.from("accounts_payable").insert({
+              recurring_charge_id: ruleId, competence, batch_id: batchId, supplier_name: rule.supplier_name, category: "Custo Fixo", description: rule.description, amount, due_date: due, status: "pending"
+            });
+            if (!insertErr) count++;
+          }
+        }
+        i++;
+      }
+
+      closeOverlay();
+      showToast(`Lote processado. ${count} novos lançamentos gerados.`);
+      renderView();
+    } catch (e) {
+      showToast(friendlyError(e), "error");
+    } finally {
+      setBusy(event.target, false);
+    }
+  }
+});

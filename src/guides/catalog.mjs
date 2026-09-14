@@ -8,7 +8,7 @@ const tabs = (target, text) => step(target, 'Abas desta área', text);
 const guide = (title, ...steps) => ({ title, steps });
 const vacancyFilters = step('.operations-toolbar', 'Localize o registro', 'Busque por nome, e-mail, vaga ou empresa. Combine situação e empresa. Limpar remove os filtros; não exclui cadastros.');
 const documentFilters = step('.filter-bar', 'Busque e classifique', 'Pesquise pelo documento, jovem ou empresa e refine pela categoria. Limpar filtros mostra novamente os registros disponíveis.');
-const financeTabs = tabs('[aria-label="Áreas do financeiro"]', 'Contas a receber controla cobranças às empresas; Contas a pagar controla despesas; Calendário reúne os vencimentos. Feche o guia para trocar de aba e clique novamente em Como usar.');
+const financeTabs = tabs('[aria-label="Áreas do financeiro"]', 'O painel Financeiro consolida Lançamentos (A receber), Recorrências (Regras mensais), Despesas (A pagar), Boletos e integração bancária. Navegue nas abas superiores.');
 
 export const pageGuides = {
   overview: guide('Visão geral',
@@ -152,7 +152,18 @@ export const pageGuides = {
     metrics('Confira admissões abertas, contratos vigentes, férias e afastamentos e documentos pendentes.'),
     step('.administrative-hub-grid', 'Abra o módulo certo', 'Os cartões levam às áreas do DP. Depois de abrir uma, clique Como usar para aprender os controles daquela área.'),
     rows('Pendências administrativas', 'Leia os itens que exigem atenção e trate a origem indicada. O painel não resolve pendências apenas por serem visualizadas.')),
-  'finance:receivable': guide('Financeiro · Contas a receber',
+
+  'finance:dashboard': guide('Financeiro · Visão Geral',
+    intro('Visão Geral unificada', 'Aqui você encontra um resumo de toda a operação financeira: a faturar, a receber, inadimplência e o calendário de entradas/saídas.'),
+    financeTabs,
+    step('.metric-grid', 'Indicadores', 'Acompanhe métricas consolidadas dos faturamentos e recebimentos no mês.'),
+    step('.finance-calendar', 'Calendário de Vencimentos', 'Visualize quando cada cobrança e despesa vencerá para equilibrar o caixa.')),
+  'finance:recurring': guide('Financeiro · Faturamento Recorrente',
+    intro('Regras Contínuas', 'Nesta aba você cria regras que definem o faturamento de cada empresa mês a mês, sem precisar recriar a cobrança do zero.'),
+    financeTabs,
+    create('recurring-charge', 'Nova regra recorrente', 'Defina empresa, descrição, valor (fixo, por jovem ou folha) e dia padrão de vencimento. As regras ativas aparecem na listagem.'),
+    step('[data-preview-batch]', 'Geração em Lote', 'Ao virar o mês, selecione a competência e use a Prévia para analisar todos os lançamentos que serão gerados de uma só vez. A geração não duplica faturamentos já rodados.')),
+  'finance:receivable': guide('Financeiro · Lançamentos',
     intro('Controle o que a CAFCM tem a receber', 'Registre cobranças às empresas por competência e vencimento. É um controle manual; cadastrar não emite NF ou boleto no banco.'),
     financeTabs,
     metrics('A receber soma valores abertos, Vencido mostra abertos após o prazo, Recebido reúne pagamentos registrados e Cobranças conta os registros.'),
@@ -160,7 +171,7 @@ export const pageGuides = {
     step('.filter-bar', 'Buscar cobranças', 'Pesquise empresa, descrição, NF ou boleto e refine por situação e empresa. Limpar filtros não altera valores.'),
     rows('Leia o vencimento', 'Cada linha mostra empresa, competência, vencimento, valor e situação. Vencido — atualizar sinaliza atraso sem registrar recebimento.'),
     step('[data-edit-financial-charge]', 'Atualize o ciclo', 'Use Alterar para registrar NF emitida, boleto, envio, cobrança e pagamento. Informe recebimento apenas após confirmação; o registro não movimenta a conta bancária.', 'finance.manage')),
-  'finance:payable': guide('Financeiro · Contas a pagar',
+  'finance:payable': guide('Financeiro · Despesas',
     intro('Registre o que a CAFCM tem a pagar', 'Esta aba controla despesas e fornecedores. Ela é separada das cobranças que as empresas devem à instituição.'),
     financeTabs,
     metrics('A pagar reúne contas abertas; Vencido são abertas após a data; Pago mostra valores pagos registrados; Contas indica a quantidade cadastrada.'),
@@ -292,7 +303,7 @@ export const pageGuides = {
     step('.study-status', 'Situação de estudo', 'Ainda não iniciou, Em andamento e Concluído ajudam a orientar o jovem. Converse com ele e com a CAFCM quando precisar de acompanhamento.')),
 };
 
-const subviews = { finance: ['financeTab', 'receivable'], vacancies: ['vacancyTab', 'overview'], documents: ['documentTab', 'files'], automations: ['automationTab', 'overview'] };
+const subviews = { finance: ['financeTab', 'dashboard'], vacancies: ['vacancyTab', 'overview'], documents: ['documentTab', 'files'], automations: ['automationTab', 'overview'] };
 
 export function guideKeyFor(state) {
   if (state.view === 'student-course' && state.selectedLessonId) return 'student-lesson';
