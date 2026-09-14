@@ -2495,3 +2495,31 @@ body { max-width: 100%; overflow-x: hidden; }
   .finance-row .person-actions { grid-column: 2; }
   .search-field { min-width: 0; }
 }
+
+
+/* Financeiro: landing page de Notas sem submenu lateral. */
+.notes-page-head { margin-bottom: 22px; }
+.notes-page-head .eyebrow { display: block; margin-bottom: 7px; color: var(--blue); font-size: .72rem; font-weight: 850; letter-spacing: .12em; }
+.notes-action-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
+.notes-action-card { min-width: 0; min-height: 150px; padding: 19px; border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; gap: 15px; color: var(--ink); background: #fff; box-shadow: 0 8px 26px rgba(27,60,104,.04); text-decoration: none; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.notes-action-card:hover { border-color: #b8d3f4; box-shadow: 0 12px 28px rgba(27,60,104,.09); transform: translateY(-2px); }
+.notes-action-icon { width: 42px; height: 42px; border-radius: 13px; display: inline-grid; place-items: center; color: var(--blue); background: var(--blue-soft); }
+.notes-action-copy { min-width: 0; display: grid; gap: 6px; }
+.notes-action-copy strong { color: var(--navy); font-size: .91rem; line-height: 1.3; }
+.notes-action-copy small { color: var(--muted); font-size: .76rem; line-height: 1.5; }
+.notes-action-arrow { margin-top: auto; color: var(--blue); }
+.notes-action-arrow .icon { width: 17px; height: 17px; }
+.notes-empty-state { min-height: 250px; margin-bottom: 18px; display: flex; align-items: center; justify-content: center; gap: 24px; text-align: left; background: linear-gradient(135deg, #fff, #f8fbff); }
+.notes-empty-illustration { width: 76px; height: 76px; border-radius: 22px; display: grid; place-items: center; flex: 0 0 auto; color: var(--blue); background: var(--blue-soft); }
+.notes-empty-illustration .icon { width: 42px; height: 42px; }
+.notes-empty-copy { max-width: 570px; }
+.notes-empty-copy h2 { margin: 0 0 8px; color: var(--navy); font-size: 1.3rem; }
+.notes-empty-copy p { margin: 0 0 18px; color: var(--muted); line-height: 1.6; }
+.notes-tip { display: flex; align-items: flex-start; gap: 13px; padding: 17px 20px; background: #f8fbff; }
+.notes-tip-icon { color: var(--blue); }
+.notes-tip-icon .icon { width: 21px; height: 21px; }
+.notes-tip strong { color: var(--navy); }
+.notes-tip p { margin: 4px 0 0; color: var(--muted); line-height: 1.55; font-size: .84rem; }
+@media (max-width: 1100px) { .notes-action-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .notes-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .notes-empty-state { flex-direction: column; align-items: flex-start; text-align: left; } }
+@media (max-width: 420px) { .notes-action-grid { grid-template-columns: 1fr; } }
