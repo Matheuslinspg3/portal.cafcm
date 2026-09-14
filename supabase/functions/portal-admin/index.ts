@@ -91,6 +91,50 @@ function generateTemporaryPassword() {
   return value;
 }
 
+function isTestAuthUser(user: any) {
+  return user?.app_metadata?.portal_test === true || user?.user_metadata?.portal_test === true;
+}
+
+async function provisionTestUser(
+  admin: any,
+  requesterId: string,
+  person: { fullName: string; role: string; companyId: string | null; department: string | null },
+) {
+  // Supabase Auth still receives an internal, confirmed identifier so the test account can sign in.
+  // It is never sent to a recipient and is hidden from the normal people list.
+  const email = `test-${crypto.randomUUID()}@test.portal.cafcm.org.br`;
+  const password = generateTemporaryPassword();
+  const appMetadata: Record<string, unknown> = { portal_test: true, portal_role: person.role };
+  if (person.companyId) appMetadata.company_id = person.companyId;
+  if (person.department) appMetadata.portal_department = person.department;
+
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: person.fullName, portal_test: true },
+    app_metadata: appMetadata,
+  });
+  if (createError || !created.user) throw createError || new Error("Não foi possível criar o usuário de teste.");
+
+  const { error: profileError } = await admin.from("profiles").upsert({
+    id: created.user.id,
+    full_name: person.fullName,
+    role: person.role,
+    company_id: person.companyId,
+    department: person.department,
+    is_active: true,
+    archived_at: null,
+    archived_by: null,
+  });
+  const { error: contactError } = await admin.from("profile_contacts").upsert({ id: created.user.id, email });
+  if (profileError || contactError) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    throw new Error("O perfil de teste não pôde ser salvo.");
+  }
+  return { user: created.user, email, password };
+}
+
 function authErrorResponse(req: Request, error: any, fallback: string) {
   const message = String(error?.message ?? "").toLowerCase();
   const code = String(error?.code ?? "").toLowerCase();
@@ -477,15 +521,19 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
   if ("response" in access) return access.response;
   const { ctx, requesterId, requesterDepartment } = access;
 
-  const email = cleanText(input.email, 254).toLowerCase();
+  const requestedEmail = cleanText(input.email, 254).toLowerCase();
   const fullName = cleanText(input.fullName, 160);
   const role = cleanText(input.role, 32);
+  const testMode = input.testMode === true || input.testMode === "true" || input.testMode === "yes";
   const suppliedCompanyId = cleanText(input.companyId, 36) || null;
   const companyId = role === "cafcm_admin" ? null : suppliedCompanyId;
   const department = normalizeDepartment(input.department, role);
 
-  if (!validEmail(email) || fullName.length < 2 || !ROLE_VALUES.has(role) || (role === "cafcm_admin" && !department)) {
-    return json(req, { error: "Revise o nome, o e-mail e o tipo de acesso." }, 400);
+  if ((!testMode && !validEmail(requestedEmail)) || fullName.length < 2 || !ROLE_VALUES.has(role) || (role === "cafcm_admin" && !department)) {
+    return json(req, { error: testMode ? "Revise o nome e o tipo de acesso." : "Revise o nome, o e-mail e o tipo de acesso." }, 400);
+  }
+  if (testMode && requesterDepartment !== "management") {
+    return json(req, { error: "Somente a Direção e Administração pode criar usuários de teste." }, 403);
   }
   if (role === "cafcm_admin" && requesterDepartment !== "management") {
     return json(req, { error: "Somente a Direção e Administração pode criar acessos para a equipe CAFCM." }, 403);
@@ -494,24 +542,36 @@ async function inviteUser(req: Request, input: Record<string, unknown>) {
   const companyError = await validateCompanyLink(ctx.supabaseAdmin, role, companyId);
   if (companyError) return json(req, { error: companyError }, 400);
 
-  const existingUser = await findAuthUserByEmail(ctx.supabaseAdmin, email);
-  if (existingUser) {
-    return json(req, {
-      error: "Já existe uma conta com este e-mail. Use a opção Alterar ou Reenviar acesso na lista de pessoas.",
-      code: "email_already_registered",
-    }, 409);
+  if (!testMode) {
+    const existingUser = await findAuthUserByEmail(ctx.supabaseAdmin, requestedEmail);
+    if (existingUser) {
+      return json(req, {
+        error: "Já existe uma conta com este e-mail. Use a opção Alterar ou Reenviar acesso na lista de pessoas.",
+        code: "email_already_registered",
+      }, 409);
+    }
   }
 
   try {
+    if (testMode) {
+      const result = await provisionTestUser(ctx.supabaseAdmin, requesterId, { fullName, role, companyId, department });
+      await writeAudit(ctx.supabaseAdmin, requesterId, "user.test_created", "profile", result.user.id, {
+        test_user: true,
+        role,
+        company_id: companyId,
+        department,
+      }, result.user.id);
+      return json(req, { ok: true, userId: result.user.id, testUser: true, loginEmail: result.email, temporaryPassword: result.password });
+    }
     const result = await provisionInvitedUser(req, ctx.supabaseAdmin, requesterId, {
-      email,
+      email: requestedEmail,
       fullName,
       role,
       companyId,
       department,
     });
     await writeAudit(ctx.supabaseAdmin, requesterId, "user.invited", "profile", result.user.id, {
-      email,
+      email: requestedEmail,
       role,
       company_id: companyId,
       department,
@@ -553,7 +613,8 @@ async function listPortalUsers(req: Request, input: Record<string, unknown>) {
       return {
         id: profile.id,
         fullName: profile?.full_name || authUser?.user_metadata?.full_name || "",
-        email: contactMap.get(profile.id) || authUser?.email || "",
+        email: isTestAuthUser(authUser) ? "" : contactMap.get(profile.id) || authUser?.email || "",
+        isTest: isTestAuthUser(authUser),
         role,
         companyId: profile?.company_id ?? authUser?.app_metadata?.company_id ?? null,
         department: role === "cafcm_admin" ? profile?.department ?? authUser?.app_metadata?.portal_department ?? "management" : null,
