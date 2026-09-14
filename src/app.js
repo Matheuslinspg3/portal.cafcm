@@ -665,6 +665,7 @@ function viewTitle(view) {
     terminations: ["Desligamentos", "Processos, documentos e histórico"],
     personnel: ["Departamento Pessoal", "Ciclo administrativo dos jovens"],
     finance: ["Financeiro", "Cobranças, boletos e recebimentos"],
+    notes: ["Notas", "Central de notas fiscais"],
     documents: ["Documentos", "Arquivo digital privado da CAFCM"],
     accounting: ["eSocial / Obrigações", "Envios, retornos e conferência"],
     procedures: ["Procedimentos", "Processos, responsáveis e prazos"],
