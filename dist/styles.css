@@ -2523,3 +2523,11 @@ body { max-width: 100%; overflow-x: hidden; }
 @media (max-width: 1100px) { .notes-action-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 680px) { .notes-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .notes-empty-state { flex-direction: column; align-items: flex-start; text-align: left; } }
 @media (max-width: 420px) { .notes-action-grid { grid-template-columns: 1fr; } }
+
+
+/* Usuários de teste: controle explícito dentro de Pessoas e Convites. */
+.test-user-toggle { display: flex; align-items: flex-start; gap: 10px; padding: 13px 14px; border: 1px solid #cfe0f7; border-radius: 12px; color: var(--navy); background: #f7fbff; cursor: pointer; }
+.test-user-toggle input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--blue); flex: 0 0 auto; }
+.test-user-toggle span { display: grid; gap: 4px; }
+.test-user-toggle strong { font-size: .82rem; }
+.test-user-toggle small { color: var(--muted); line-height: 1.45; }
