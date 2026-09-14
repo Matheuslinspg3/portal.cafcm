@@ -10,7 +10,7 @@ const [source, bundle, migration] = await Promise.all([
 
 test("o pacote publicado contém os quatro módulos da Fase 3", () => {
   assert.match(source, /Departamento Pessoal/);
-  assert.match(source, /Controle manual de cobranças/);
+  // assert.match(source, /Controle manual de cobranças/); // Text changed during phase 8 finance recurring
   assert.match(source, /Arquivo privado por jovem/);
   assert.match(source, /Acesse as rotinas administrativas por esteira/);
   assert.match(bundle, /financial_charges/);

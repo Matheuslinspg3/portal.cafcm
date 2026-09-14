@@ -1868,14 +1868,16 @@ function financeCalendar(monthValue, charges, payables, canManage) {
 }
 
 async function renderFinance(content) {
-  const [chargesResult, payablesResult, references] = await Promise.all([
+  const [chargesResult, payablesResult, recurringResult, references] = await Promise.all([
     supabase.from("financial_charges").select("*").order("competence", { ascending: false }).order("due_date", { ascending: true, nullsFirst: false }),
     supabase.from("accounts_payable").select("*").order("due_date", { ascending: true }),
+    supabase.from("recurring_charges").select("*").order("created_at", { ascending: false }),
     loadOperationalReferences(),
   ]);
-  if (chargesResult.error || payablesResult.error) throw chargesResult.error || payablesResult.error;
+  if (chargesResult.error || payablesResult.error || recurringResult?.error) throw chargesResult.error || payablesResult.error || recurringResult?.error;
   const charges = chargesResult.data || [];
   const payables = payablesResult.data || [];
+  const recurring = recurringResult?.data || [];
   const canManage = hasPermission("finance.manage");
   const companyMap = new Map(references.companies.map((item) => [item.id, item.name]));
   const search = state.financeSearch.trim().toLocaleLowerCase("pt-BR");
@@ -1895,18 +1897,52 @@ async function renderFinance(content) {
   const overduePayables = openPayables.filter((item) => item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date());
   const paidPayables = payables.filter((item) => item.status === "paid");
   const hasChargeFilters = Boolean(state.financeSearch || state.financeStatus || state.financeCompany);
-  const tabs = [["receivable", "Contas a receber", charges.length], ["payable", "Contas a pagar", payables.length], ["calendar", "Calendário", ""]];
-  if (!tabs.some(([key]) => key === state.financeTab)) state.financeTab = "receivable";
-  const action = !canManage ? "" : state.financeTab === "payable" ? `<button class="btn btn-primary" data-dialog="payable">${icon("plus")} Nova conta a pagar</button>` : `<button class="btn btn-primary" data-dialog="financial-charge">${icon("plus")} Nova cobrança</button>`;
+  const tabs = [["dashboard", "Visão Geral", ""], ["receivable", "Lançamentos", charges.length], ["recurring", "Recorrências", recurring.length], ["payable", "Despesas", payables.length], ["billets", "Boletos", ""], ["bank", "Bradesco", ""]];
+  if (!tabs.some(([key]) => key === state.financeTab)) state.financeTab = "dashboard";
+
+  const action = !canManage ? "" :
+    state.financeTab === "payable" ? `<button class="btn btn-primary" data-dialog="payable">${icon("plus")} Nova despesa</button>` :
+    state.financeTab === "recurring" ? `<button class="btn btn-primary" data-dialog="recurring-charge">${icon("plus")} Nova regra recorrente</button>` :
+    state.financeTab === "receivable" ? `<button class="btn btn-primary" data-dialog="financial-charge">${icon("plus")} Lançamento avulso</button>` : "";
+
   let body = "";
-  if (state.financeTab === "receivable") {
+
+  if (state.financeTab === "dashboard") {
+    const toInvoice = charges.filter(c => c.status === "to_invoice").reduce((a, b) => a + Number(b.amount || 0), 0);
+    const toReceive = openCharges.reduce((a, b) => a + Number(b.amount || 0), 0);
+    const receivedAmount = received.reduce((a, b) => a + Number(b.paid_amount ?? b.amount ?? 0), 0);
+    const overdueAmount = overdueCharges.reduce((a, b) => a + Number(b.amount || 0), 0);
+
+    const attention = [];
+    if (overdueCharges.length) attention.push([`${overdueCharges.length} cobranças vencidas`, "Verifique pendências e faça contato", "receivable"]);
+    if (overduePayables.length) attention.push([`${overduePayables.length} despesas vencidas`, "Acesse contas a pagar", "payable"]);
+    // Could add more attention items (e.g. handoffs)
+
+    body = `
+      <section class="metric-grid">
+        ${metric("A Faturar", formatMoney(toInvoice), "clock")}
+        ${metric("A Receber", formatMoney(toReceive), "calendar")}
+        ${metric("Recebido", formatMoney(receivedAmount), "check")}
+        ${metric("Inadimplência", formatMoney(overdueAmount), "alert")}
+      </section>
+      ${financeCalendar(state.financeMonth, charges, payables, canManage)}
+      <section class="card">
+        <div class="card-head"><div><span class="eyebrow">Exige Atenção</span><h2>Pendências Financeiras</h2></div></div>
+        ${attention.length ? `<div class="people-list">${attention.map(([t, d, v]) => operationalRow(t, d, "Pendente", `<button class="btn btn-small btn-secondary" data-finance-tab="${v}">Abrir</button>`)).join("")}</div>` : emptyState("Tudo em dia", "Nenhuma pendência crítica financeira.")}
+      </section>
+    `;
+  } else if (state.financeTab === "recurring") {
+    body = `<section class="card"><div class="people-list finance-list">${recurring.length ? recurring.map((item) => { return `<article class="person-row finance-row"><span class="avatar">${icon("clock")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · Venc. ${item.due_day}</small></div><div class="finance-amount"><small>Regra</small><strong>${item.value_rule === "fixed" ? formatMoney(item.fixed_amount) : item.value_rule === "per_apprentice" ? "Por Jovem" : "% Folha"}</strong></div><div class="person-access"><span class="status status-draft">${item.is_active ? "Ativa" : "Inativa"}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-recurring="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma recorrência", "Crie regras de faturamento contínuo.", canManage ? `<button class="btn btn-primary" data-dialog="recurring-charge">Nova regra</button>` : "")}</div></section>`;
+  } else if (state.financeTab === "billets") {
+    body = `<section class="card"><div class="card-head"><div><h2>Visão unificada de Boletos</h2></div></div>${emptyState("Gerenciamento de boletos", "Consolide recebimentos e baixas manuais nesta visão.")}</section>`;
+  } else if (state.financeTab === "bank") {
+    body = `<section class="card"><div class="card-head"><div><h2>Integração Bancária</h2></div></div>${emptyState("Ambiente Sandbox", "O ambiente de integração encontra-se em testes.")}</section>`;
+  } else if (state.financeTab === "receivable") {
     body = `<section class="metric-grid">${metric("A receber", formatMoney(openCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overdueCharges.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Recebido", formatMoney(received.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Cobranças", charges.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar empresa, cobrança, NF ou boleto" aria-label="Buscar cobranças" /></label><select data-finance-filter="status" aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(financialStatusLabels, state.financeStatus)}</select><select data-finance-filter="company" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>${references.companies.map((company) => `<option value="${company.id}" ${state.financeCompany === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select>${hasChargeFilters ? `<button class="btn btn-small btn-quiet" data-clear-finance-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredCharges.length ? filteredCharges.map((item) => { const isLate = !["paid", "cancelled", "overdue"].includes(item.status) && item.due_date && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${formatMonth(item.competence)} · vence ${item.due_date ? formatDate(item.due_date) : "sem data"}${item.invoice_number ? ` · NF ${item.invoice_number}` : ""}${item.payment_slip_number ? ` · boleto ${item.payment_slip_number}` : ""}`; const status = isLate ? "Vencido — atualizar" : financialStatusLabels[item.status] || item.status; return `<article class="person-row finance-row"><span class="avatar">${icon(isLate ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(companyMap.get(item.company_id) || "Empresa")}</strong><small>${escapeHtml(item.description)} · ${escapeHtml(detail)}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-financial-charge="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma cobrança encontrada", hasChargeFilters ? "Altere os filtros para localizar outro registro." : "Cadastre a primeira cobrança para iniciar o controle financeiro.", canManage ? `<button class="btn btn-primary" data-dialog="financial-charge">Nova cobrança</button>` : "")}</div></section>`;
   } else if (state.financeTab === "payable") {
     body = `<section class="metric-grid">${metric("A pagar", formatMoney(openPayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "calendar")}${metric("Vencido", formatMoney(overduePayables.reduce((total, item) => total + Number(item.amount || 0), 0)), "alert")}${metric("Pago", formatMoney(paidPayables.reduce((total, item) => total + Number(item.paid_amount ?? item.amount ?? 0), 0)), "check")}${metric("Contas", payables.length, "history")}</section><section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-finance-search value="${escapeHtml(state.financeSearch)}" placeholder="Buscar fornecedor, despesa ou referência" aria-label="Buscar contas a pagar" /></label><select data-payable-filter aria-label="Filtrar por situação"><option value="">Todas as situações</option>${selectOptions(payableStatusLabels, state.payableStatus)}</select>${state.financeSearch || state.payableStatus ? `<button class="btn btn-small btn-quiet" data-clear-payable-filters>Limpar filtros</button>` : ""}</section><section class="card"><div class="people-list finance-list">${filteredPayables.length ? filteredPayables.map((item) => { const late = !["paid", "cancelled"].includes(item.status) && new Date(`${item.due_date}T23:59:59`) < new Date(); const detail = `${escapeHtml(item.category)} · vence ${formatDate(item.due_date)}${item.planned_payment_date ? ` · previsto para ${formatDate(item.planned_payment_date)}` : ""}${item.payment_method === "bradesco" ? " · Bradesco (manual)" : ""}`; return `<article class="person-row finance-row"><span class="avatar">${icon(late ? "alert" : item.status === "paid" ? "check" : "calendar")}</span><div class="person-main"><strong>${escapeHtml(item.supplier_name)}</strong><small>${escapeHtml(item.description)} · ${detail}</small></div><div class="finance-amount"><small>Valor</small><strong>${formatMoney(item.amount)}</strong></div><div class="person-access"><span class="status status-draft">${escapeHtml(late ? "Vencida — atualizar" : payableStatusLabels[item.status] || item.status)}</span></div><div class="person-actions">${canManage ? `<button class="btn btn-small btn-secondary" data-edit-payable="${item.id}">${icon("edit")} Alterar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhuma conta a pagar encontrada", "Cadastre fornecedores, despesas, vencimentos e responsáveis para manter os avisos centralizados.", canManage ? `<button class="btn btn-primary" data-dialog="payable">Nova conta a pagar</button>` : "")}</div></section>`;
-  } else {
-    body = financeCalendar(state.financeMonth, charges, payables, canManage);
   }
-  content.innerHTML = `${pageHead("Financeiro", "Controle manual de cobranças, contas a pagar, calendário e lembretes de vencimento em uma única rotina.", action)}<nav class="operations-tabs" aria-label="Áreas do financeiro">${tabs.map(([key, label, count]) => `<button class="${state.financeTab === key ? "active" : ""}" data-finance-tab="${key}">${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>${body}`;
+  content.innerHTML = `${pageHead("Financeiro", "Controles financeiros, faturamentos, despesas e relatórios consolidados em um só lugar.", action)}<nav class="operations-tabs" aria-label="Áreas do financeiro">${tabs.map(([key, label, count]) => `<button class="${state.financeTab === key ? "active" : ""}" data-finance-tab="${key}">${label}${count !== "" ? `<span>${count}</span>` : ""}</button>`).join("")}</nav>${body}`;
 }
 
 async function renderHr(content) {
@@ -2910,7 +2946,7 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
-  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge", "payable", "payroll-competence"].includes(type)) {
+  if (["admission", "contract", "leave", "termination", "accounting", "document", "document-edit", "document-requirement", "financial-charge", "payable", "payroll-competence", "recurring-charge"].includes(type)) {
     const references = await loadOperationalReferences();
     const apprenticeOptions = references.apprentices.map((person) => `<option value="${person.id}">${escapeHtml(person.full_name)}</option>`).join("");
     const companyOptions = references.companies.map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("");
@@ -2925,6 +2961,24 @@ async function openDialog(type, recordId = null) {
       const checklist = recordId ? await supabase.from("admission_checklist_items").select("*").eq("admission_id", recordId).order("position") : { data: [] };
       if (checklist.error) throw checklist.error;
       body = `<form id="admission-form" class="dialog-form wide-form"><input type="hidden" name="id" value="${escapeHtml(item.id || "")}" /><div class="form-grid two-columns"><label>Jovem<select name="apprenticeId" required><option value="">Selecione</option>${references.apprentices.map((person) => `<option value="${person.id}" ${item.apprentice_id === person.id ? "selected" : ""}>${escapeHtml(person.full_name)}</option>`).join("")}</select></label><label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label><label>Início previsto<input name="targetStartDate" type="date" value="${escapeHtml(item.target_start_date || "")}" /></label><label>Etapa<select name="status">${selectOptions(admissionStatusLabels, item.status || "approved")}</select></label></div>${recordId ? workflowProgress(admissionStatusLabels, item.status) : ""}<label>Observações<textarea name="notes" rows="4" maxlength="12000">${escapeHtml(item.notes || "")}</textarea></label>${recordId ? `<div class="form-section"><span>Checklist da admissão</span></div><div class="checklist-editor">${(checklist.data || []).map((check) => `<label><input type="checkbox" name="check-${check.id}" ${check.is_completed ? "checked" : ""} /> <span>${escapeHtml(check.title)}</span></label>`).join("") || "Nenhum item criado"}</div><label>Adicionar itens ao checklist<textarea name="newChecklistItems" rows="3" maxlength="2000" placeholder="Digite um item por linha"></textarea><small>Os itens são adicionados sem apagar o checklist já preenchido.</small></label>` : `<p class="form-note">Ao abrir a admissão, o Portal cria automaticamente o checklist padrão, uma pendência de acompanhamento e o envio à contabilidade. Depois você pode marcar e personalizar os itens.</p>`}<button class="btn btn-primary" type="submit">${recordId ? "Salvar admissão" : "Abrir admissão"}</button></form>`;
+    }
+    if (type === "recurring-charge") {
+      const item = await selectRecord("recurring_charges");
+      const rules = { fixed: "Valor Fixo", per_apprentice: "Por Jovem Ativo", payroll_percentage: "% sobre Folha" };
+      body = `<form id="recurring-form" class="dialog-form wide-form">
+        <input type="hidden" name="id" value="${escapeHtml(item.id || "")}" />
+        <div class="form-grid two-columns">
+          <label>Empresa<select name="companyId" required><option value="">Selecione</option>${references.companies.map((company) => `<option value="${company.id}" ${item.company_id === company.id ? "selected" : ""}>${escapeHtml(company.name)}</option>`).join("")}</select></label>
+          <label>Descrição Padrão<input name="description" required maxlength="240" value="${escapeHtml(item.description || "")}" /></label>
+          <label>Regra de Valor<select name="valueRule">${selectOptions(rules, item.value_rule || "fixed")}</select></label>
+          <label>Valor Fixo (se aplicável)<input name="fixedAmount" type="number" min="0" step="0.01" value="${escapeHtml(item.fixed_amount || "")}" /></label>
+          <label>Dia Vencimento<input name="dueDay" type="number" min="1" max="31" required value="${escapeHtml(item.due_day || "")}" /></label>
+          <label>Ativa<select name="isActive">${selectOptions({"true": "Sim", "false": "Não"}, item.is_active !== false ? "true" : "false")}</select></label>
+          <label>Data Início<input name="startDate" type="date" required value="${escapeHtml(item.start_date || "")}" /></label>
+          <label>Data Fim<input name="endDate" type="date" value="${escapeHtml(item.end_date || "")}" /></label>
+        </div>
+        <button class="btn btn-primary" type="submit">${recordId ? "Salvar regra" : "Criar regra"}</button>
+      </form>`;
     }
     if (type === "payroll-competence") {
       const item = await selectRecord("payroll_competences");
@@ -3439,8 +3493,10 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.financeTab) {
     state.financeTab = target.dataset.financeTab;
     if (state.financeTab === "receivable") pushRoute("/faturamento");
+    else if (state.financeTab === "recurring") pushRoute("/faturamento/recorrencias");
     else if (state.financeTab === "payable") pushRoute("/despesas");
     else if (state.financeTab === "billets") pushRoute("/boletos");
+    else if (state.financeTab === "bank") pushRoute("/banco");
     else pushRoute("/financeiro");
     return;
   }
@@ -4503,7 +4559,15 @@ app.addEventListener("submit", async (event) => {
           // ensure profile is active
           await supabase.from("profiles").update({ is_active: true }).eq("id", values.apprenticeId);
           await supabase.from("apprentice_records").update({ status: "active" }).eq("profile_id", values.apprenticeId);
-          // Handoff is naturally tracked via "completed" status in DB which finance can query.
+
+          await supabase.from("tasks").insert({
+             title: "Admissão Concluída (Handoff)",
+             description: "A admissão do jovem foi concluída pelo DP. Configure recorrências e contratos aplicáveis (Handoff DP -> Financeiro).",
+             category: "finance",
+             company_id: values.companyId,
+             apprentice_id: values.apprenticeId,
+             created_by: state.profile.id
+          });
         }
         const newItems = String(values.newChecklistItems || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 25);
         if (newItems.length) {
@@ -4522,11 +4586,30 @@ app.addEventListener("submit", async (event) => {
       closeOverlay(); showToast(id ? "Admissão atualizada." : "Admissão aberta com checklist."); return renderView();
     }
 
+    if (form.id === "recurring-form") {
+      const id = String(values.id || "");
+      const payload = { company_id: values.companyId, description: String(values.description || "").trim(), value_rule: values.valueRule, fixed_amount: valueOrNull(values.fixedAmount), due_day: Number(values.dueDay), is_active: values.isActive === "true", start_date: values.startDate, end_date: values.endDate || null };
+      if (payload.end_date && new Date(`${payload.end_date}T00:00:00`) < new Date(`${payload.start_date}T00:00:00`)) throw new Error("A data de término não pode ser anterior ao início.");
+      const { error } = id ? await supabase.from("recurring_charges").update(payload).eq("id", id) : await supabase.from("recurring_charges").insert({ ...payload, created_by: state.profile.id });
+      if (error) throw error;
+      closeOverlay(); showToast("Regra recorrente salva."); return renderView();
+    }
     if (form.id === "payroll-form") {
       const id = String(values.id || "");
       const payload = { company_id: values.companyId, month: values.month, status: values.status || "open", notes: String(values.notes || "").trim() };
       const { error } = id ? await supabase.from("payroll_competences").update(payload).eq("id", id) : await supabase.from("payroll_competences").insert({ ...payload, created_by: state.profile.id });
       if (error) throw error;
+
+      if (payload.status === "ready_for_finance" || payload.status === "completed") {
+         await supabase.from("tasks").insert({
+           title: "Folha Pronta para Financeiro (Handoff)",
+           description: `A competência ${payload.month} foi enviada pelo DP. Providencie pagamentos e baixas (Handoff DP -> Financeiro).`,
+           category: "finance",
+           company_id: values.companyId,
+           created_by: state.profile.id
+         });
+      }
+
       closeOverlay(); showToast("Competência salva."); return renderView();
     }
     if (form.id === "contract-form") {
@@ -4579,6 +4662,17 @@ app.addEventListener("submit", async (event) => {
       }
       if (payload.status === "completed") {
          await supabase.from("profiles").update({ is_active: false }).eq("id", values.apprenticeId);
+
+         // DP to Finance Handoff Check (Termination)
+         // Creates a notification / task for finance
+         await supabase.from("tasks").insert({
+           title: "Rescisão Concluída (Handoff)",
+           description: "A rescisão do jovem foi concluída pelo DP. Verifique faturamentos e despesas residuais (Handoff DP -> Financeiro).",
+           category: "finance",
+           company_id: values.companyId,
+           apprentice_id: values.apprenticeId,
+           created_by: state.profile.id
+         });
       }
       await supabase.from("apprentice_records").upsert({ profile_id: values.apprenticeId, status: payload.status === "completed" ? "inactive" : "termination" });
       closeOverlay(); showToast("Desligamento salvo."); return renderView();

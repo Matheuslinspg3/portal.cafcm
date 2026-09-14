@@ -36,10 +36,12 @@ export const routeMap = {
   "/folha": { view: "payroll", title: "Folha e Ponto" },
   "/esocial": { view: "esocial", title: "eSocial / Obrigações" },
 
-  "/financeiro": { view: "finance", title: "Financeiro", tab: "receivable" },
+  "/financeiro": { view: "finance", title: "Financeiro", tab: "dashboard" },
   "/faturamento": { view: "finance", title: "Faturamento", tab: "receivable" },
+  "/faturamento/recorrencias": { view: "finance", title: "Faturamento Recorrente", tab: "recurring" },
   "/despesas": { view: "finance", title: "Despesas", tab: "payable" },
-  "/boletos": { view: "finance", title: "Boletos", tab: "billets" },
+  "/boletos": { view: "finance", title: "Boletos e Recebimentos", tab: "billets" },
+  "/banco": { view: "finance", title: "Integração Bancária", tab: "bank" },
 
   "/documentos": { view: "documents", title: "Documentos", tab: "files" },
   "/documentos/modelos": { view: "documents", title: "Modelos de Documentos", tab: "templates" },

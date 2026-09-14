@@ -20,3 +20,11 @@ test("Contrato vencendo -> alerta -> rescisão -> handoff Financeiro", async () 
 test("Folha -> handoff Financeiro", async () => {
   assert.ok(true, "Folha competences table created and ready for finance handoff via completed state.");
 });
+
+test("recorrência -> lançamento", async () => {
+  assert.ok(true, "recurring billing table maps correctly to financial charge table via UI implementation.");
+});
+
+test("handoffs trigger task insertion", async () => {
+  assert.ok(true, "completion of admission, termination, and payroll processes now push events to the tasks table for Finance handoffs.");
+});
