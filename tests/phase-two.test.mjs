@@ -15,6 +15,18 @@ test("o pacote publicado foi recompilado com a Fase 2", () => {
   assert.match(bundle, /convert_candidate/);
 });
 
+test("usuários de teste não dependem de e-mail nem de convite", () => {
+  assert.match(source, /data-dialog="invite-test"/);
+  assert.match(source, /data-test-user-toggle/);
+  assert.match(source, /testMode/);
+  assert.match(source, /mode === "test"/);
+  assert.match(edgeFunction, /function provisionTestUser/);
+  assert.match(edgeFunction, /portal_test: true/);
+  assert.match(edgeFunction, /Somente a Direção e Administração pode criar usuários de teste/);
+  assert.match(edgeFunction, /user\.test_created/);
+  assert.match(edgeFunction, /isTestAuthUser/);
+});
+
 test("a conversão de candidato exige permissão e está exposta pela função administrativa", () => {
   assert.match(edgeFunction, /requireCafcmAdmin\(req, "vacancies\.manage"\)/);
   assert.match(edgeFunction, /action === "convert_candidate"/);
