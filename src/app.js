@@ -244,6 +244,7 @@ const viewPermissions = {
   terminations: "personnel.read",
   personnel: "personnel.read",
   finance: "finance.read",
+  notes: "finance.read",
   courses: "academic.read",
   "course-editor": "academic.read",
   "lesson-editor": "academic.read",
@@ -408,14 +409,8 @@ const navigation = {
     ] },
     { label: "Financeiro", items: [
       ["finance", "Visão Geral", "grid", { route: "/financeiro" }],
-      ["finance", "Faturamento", "calendar", { route: "/faturamento", children: [
-        ["finance", "Lançamentos", "history", { route: "/faturamento", active: false }],
-        ["finance", "Recorrências", "clock", { route: "/faturamento", active: false }],
-        ["finance", "Geração em lote", "copy", { route: "/faturamento", active: false }],
-        ["finance", "Regras", "tasks", { route: "/faturamento", active: false }],
-        ["finance", "Histórico", "history", { route: "/faturamento", active: false }],
-      ] }],
-      ["finance", "Despesas", "arrow", { route: "/despesas" }],
+      ["notes", "Notas", "copy", { route: "/notas" }],
+      ["finance", "Custos Operacionais", "arrow", { route: "/despesas" }],
       ["finance", "Boletos e Recebimentos", "download", { route: "/boletos" }],
     ] },
     { label: "Documentos", items: [["documents", "Documentos", "upload"]] },
@@ -1011,6 +1006,7 @@ async function renderView() {
       terminations: renderTerminations,
       personnel: renderPersonnel,
       finance: renderFinance,
+      notes: renderNotes,
       documents: renderDocuments,
       accounting: renderAccounting,
       procedures: renderProcedures,
@@ -1911,6 +1907,41 @@ function financeCalendar(monthValue, charges, payables, canManage) {
     const isToday = key === financeDateKey(new Date());
     return `<div class="calendar-day ${inMonth ? "" : "outside"} ${isToday ? "today" : ""}"><b>${date.getDate()}</b><div>${events.slice(0, 3).map((event) => `<button class="calendar-event ${event.type}" ${canManage ? `data-edit-${event.type === "pay" ? "payable" : "financial-charge"}="${event.id}"` : "disabled"} title="${escapeHtml(event.label)} · ${formatMoney(event.value)}">${escapeHtml(event.label)}</button>`).join("")}${events.length > 3 ? `<small>+${events.length - 3} lançamento(s)</small>` : ""}</div></div>`;
   }).join("")}</div></section>`;
+}
+
+async function renderNotes(content) {
+  const noteActions = [
+    { title: "Notas de faturamento", text: "Acesse os lançamentos e o acompanhamento das notas emitidas.", icon: "copy" },
+    { title: "Notas recorrentes", text: "Organize os lançamentos que se repetem ao longo dos períodos.", icon: "clock" },
+    { title: "Geração em lote", text: "Centralize a preparação de vários lançamentos em uma única rotina.", icon: "download" },
+    { title: "Regras padrão", text: "Consulte as regras administrativas usadas no faturamento.", icon: "tasks" },
+    { title: "Histórico", text: "Consulte o histórico dos registros e alterações de notas.", icon: "history" },
+  ];
+  const actionCards = noteActions.map((item) => `
+    <a class="notes-action-card" href="/faturamento" data-route="/faturamento">
+      <span class="notes-action-icon">${icon(item.icon)}</span>
+      <span class="notes-action-copy"><strong>${item.title}</strong><small>${item.text}</small></span>
+      <span class="notes-action-arrow">${icon("arrow")}</span>
+    </a>
+  `).join("");
+  content.innerHTML = `
+    <header class="page-head notes-page-head">
+      <div><span class="eyebrow">FINANCEIRO</span><h1>Notas</h1><p>Centralize aqui todas as funções relacionadas às notas fiscais.</p></div>
+    </header>
+    <section class="notes-action-grid" aria-label="Funções de notas fiscais">${actionCards}</section>
+    <section class="notes-empty-state card">
+      <div class="notes-empty-illustration">${icon("empty")}</div>
+      <div class="notes-empty-copy">
+        <h2>Gerencie suas notas fiscais</h2>
+        <p>Utilize as opções acima para acessar as funcionalidades de notas, como emissão, recorrência, geração em lote, regras e histórico.</p>
+        <a class="btn btn-primary" href="/faturamento" data-route="/faturamento">Começar agora</a>
+      </div>
+    </section>
+    <aside class="notes-tip card">
+      <span class="notes-tip-icon">${icon("help")}</span>
+      <div><strong>Dica</strong><p>As funcionalidades de notas ajudam a automatizar processos, manter a conformidade fiscal e centralizar todo o histórico em um só lugar.</p></div>
+    </aside>
+  `;
 }
 
 async function renderFinance(content) {
@@ -3403,6 +3434,13 @@ app.addEventListener("click", async (event) => {
     if (navRoute && navRoute !== "#") pushRoute(navRoute);
     else pushView(navId);
     app.querySelector(".portal-shell")?.classList.remove("menu-open");
+    return;
+  }
+
+  const routeLink = event.target.closest("a[data-route]");
+  if (routeLink) {
+    event.preventDefault();
+    pushRoute(routeLink.getAttribute("data-route"));
     return;
   }
 
