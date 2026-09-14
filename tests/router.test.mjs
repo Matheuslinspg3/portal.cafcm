@@ -10,6 +10,7 @@ test("route map properly defines routes and tabs", () => {
   assert.equal(routeMap["/rh"].view, "overview");
   assert.equal(routeMap["/folha"].view, "personnel");
   assert.equal(routeMap["/esocial"].view, "accounting");
+  assert.equal(routeMap["/notas"].view, "notes");
 
   assert.ok(routeMap["/faturamento"]);
   assert.equal(routeMap["/faturamento"].view, "finance");
@@ -19,6 +20,7 @@ test("route map properly defines routes and tabs", () => {
 test("viewToUrl maps views back to canonical URLs", () => {
   assert.equal(viewToUrl["overview"], "/");
   assert.equal(viewToUrl["finance"], "/financeiro");
+  assert.equal(viewToUrl["notes"], "/notas");
 });
 
 test("resolveRoute correctly updates state and parses URL params", () => {
