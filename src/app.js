@@ -959,9 +959,7 @@ async function renderPortal() {
           <button class="icon-btn menu-button" data-open-menu aria-label="Abrir menu">${icon("menu")}</button>
           <div><strong>${title}</strong><small>${subtitle}</small></div>
           ${profile.role === "cafcm_admin" ? `<button class="icon-btn notification-button ${state.notificationUnreadCount ? "has-unread" : ""}" data-nav="notifications" aria-label="Notificações${state.notificationUnreadCount ? `: ${state.notificationUnreadCount} não lidas` : ""}">${icon("bell")}${state.notificationUnreadCount ? `<b>${state.notificationUnreadCount > 99 ? "99+" : state.notificationUnreadCount}</b>` : ""}</button>` : ""}
-          <button class="btn btn-quiet" data-dialog="my-profile">${icon("users")} <span>Minha conta</span></button>
           <button class="btn btn-quiet help-topbar" data-open-wizard>${icon("help")} <span>Como usar</span></button>
-          <button class="icon-btn" data-logout aria-label="Sair do portal">${icon("logout")}</button>
         </header>
         <main id="main-content" class="content"><div class="content-loading"><div class="spinner"></div><p>Carregando informações...</p></div></main>
       </section>
@@ -3389,8 +3387,16 @@ app.addEventListener("click", async (event) => {
   const groupToggle = event.target.closest(".nav-label-btn");
   if (groupToggle) {
     const group = groupToggle.closest(".nav-group");
-    group.classList.toggle("expanded");
-    const isExpanded = group.classList.contains("expanded");
+    const willExpand = !group.classList.contains("expanded");
+    if (willExpand) {
+      app.querySelectorAll(".nav-group.expanded").forEach((openGroup) => {
+        if (openGroup === group) return;
+        openGroup.classList.remove("expanded");
+        openGroup.querySelector(".nav-label-btn")?.setAttribute("aria-expanded", "false");
+      });
+    }
+    group.classList.toggle("expanded", willExpand);
+    const isExpanded = willExpand;
     groupToggle.setAttribute("aria-expanded", isExpanded);
     return;
   }

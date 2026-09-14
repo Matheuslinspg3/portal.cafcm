@@ -41,16 +41,16 @@ export function renderSidebar({ nav, activeBase, profile, roleLabels, brandHTML,
             `;
           }).join("")}
         </nav>
-        <button class="guide-card" data-open-wizard>
-          ${iconFn("help")}
-          <span><strong>Como usar esta aba</strong><small>Passo a passo da tela atual</small></span>
-        </button>
         <div class="sidebar-user">
           <span class="avatar">${escapeHtmlFn(getInitials(profile.full_name))}</span>
           <span class="user-info">
             <strong>${escapeHtmlFn(profile.full_name || roleLabels[profile.role])}</strong>
             <small>${escapeHtmlFn(profileAccessLabelFn(profile))}</small>
           </span>
+        </div>
+        <div class="sidebar-account-actions">
+          <button class="sidebar-account-action" data-dialog="my-profile">${iconFn("users")}<span>Minha conta</span></button>
+          <button class="sidebar-account-action sidebar-account-logout" data-logout>${iconFn("logout")}<span>Sair</span></button>
         </div>
       </aside>
       <section class="portal-main">

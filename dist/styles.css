@@ -2272,3 +2272,158 @@ input:focus, select:focus, textarea:focus {
   .apprentice-metrics,
   .apprentice-row .person-actions { grid-column: 2; }
 }
+
+/* CAFCM UI/UX polish: shared tokens, navigation hierarchy and responsive frame. */
+:root {
+  --primary: var(--blue);
+  --primary-hover: #075bdb;
+  --background: var(--canvas);
+  --surface: #fff;
+  --border: var(--line);
+  --text: var(--ink);
+  --text-muted: var(--muted);
+  --danger: var(--red);
+  --warning: var(--orange);
+  --success: var(--green);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --shadow-sm: 0 8px 24px rgba(27, 60, 104, .05);
+  --shadow-md: 0 18px 45px rgba(14, 45, 91, .12);
+  --sidebar-expanded-width: 252px;
+  --sidebar-collapsed-width: 72px;
+}
+
+.portal-shell { grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr); }
+.sidebar {
+  width: var(--sidebar-expanded-width);
+  padding: 20px 12px 16px;
+  background: linear-gradient(180deg, #0b62d6 0%, #08438d 48%, #062452 100%);
+  box-shadow: 10px 0 30px rgba(7, 27, 66, .14);
+}
+.sidebar-head { padding: 0 8px 20px; margin-bottom: 4px; }
+.brand-container { min-width: 0; overflow: hidden; }
+.brand-inverse .brand-mark { width: 40px; height: 40px; border-radius: 12px; }
+.brand-inverse .brand-copy strong { color: #fff; font-size: .95rem; }
+.brand-inverse .brand-copy small { color: rgba(255,255,255,.62); }
+.sidebar-toggle { color: rgba(255,255,255,.82); border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.08); }
+.sidebar-toggle:hover { color: #fff; background: rgba(255,255,255,.16); }
+.sidebar nav { margin: 0; padding: 0 2px; gap: 8px; }
+.nav-group { gap: 3px; }
+.nav-label-btn {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: rgba(255,255,255,.58);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-label-btn:hover { color: #fff; background: rgba(255,255,255,.08); }
+.nav-label { padding: 0; color: inherit; font-size: .67rem; letter-spacing: .12em; }
+.nav-chevron { display: inline-grid; transition: transform .18s ease; }
+.nav-chevron .icon { width: 15px; height: 15px; }
+.nav-group.expanded .nav-chevron { transform: rotate(90deg); }
+.nav-group-content { display: grid; gap: 3px; margin-top: 2px; }
+.nav-group:not(.expanded) .nav-group-content { display: none; }
+.nav-item {
+  min-height: 42px;
+  padding: 0 11px;
+  border-radius: 10px;
+  color: rgba(255,255,255,.78);
+  font-size: .84rem;
+  font-weight: 700;
+  text-decoration: none !important;
+  transition: color .18s ease, background .18s ease, transform .18s ease;
+}
+.nav-item .icon { width: 18px; height: 18px; opacity: .9; }
+.nav-item:hover { color: #fff; background: rgba(255,255,255,.11); transform: translateX(2px); }
+.nav-item:focus-visible { outline-color: rgba(148,241,244,.7); }
+.nav-item.active { color: var(--navy-2); background: #fff; box-shadow: 0 8px 20px rgba(0,20,63,.18); }
+.nav-item.active .icon { color: var(--blue); }
+.guide-card { display: none !important; }
+.sidebar-user { margin-top: auto; padding: 14px 8px 0; }
+.sidebar-user strong { font-size: .8rem; }
+.sidebar-account-actions {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 4px 0;
+  border-top: 1px solid rgba(255,255,255,.13);
+}
+.sidebar-account-action {
+  min-height: 38px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,.72);
+  background: transparent;
+  font-size: .78rem;
+  font-weight: 700;
+  text-align: left;
+}
+.sidebar-account-action .icon { width: 17px; height: 17px; }
+.sidebar-account-action:hover { color: #fff; background: rgba(255,255,255,.1); }
+.sidebar-account-logout { color: rgba(255,220,224,.8); }
+.portal-main { min-width: 0; }
+.topbar { min-height: 72px; padding-inline: clamp(20px, 2.4vw, 36px); }
+.topbar .help-topbar { color: var(--blue); border-color: #cfe0f7; background: #f7fbff; }
+.content { width: min(100%, 1400px); padding: 28px clamp(20px, 2.4vw, 36px) 52px; }
+.page-head { margin-bottom: 24px; gap: 20px; }
+.page-head h1, .editor-head h1, .student-course-head h1 { font-size: clamp(1.8rem, 2.6vw, 2.2rem); }
+.card, .metric { border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.metric { min-height: 112px; padding: 18px; }
+.card-head { margin-bottom: 16px; }
+
+.portal-shell.sidebar-compact { grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr); }
+.sidebar-compact .sidebar { width: var(--sidebar-collapsed-width); padding-inline: 10px; }
+.sidebar-compact .sidebar-head { justify-content: center; padding: 0 0 56px; }
+.sidebar-compact .brand-copy,
+.sidebar-compact .nav-label,
+.sidebar-compact .nav-chevron,
+.sidebar-compact .sidebar-user .user-info,
+.sidebar-compact .sidebar-account-action span { display: none; }
+.sidebar-compact .brand-mark { width: 40px; height: 40px; }
+.sidebar-compact .sidebar-toggle { position: absolute; top: 68px; left: 20px; width: 32px; height: 32px; }
+.sidebar-compact .nav-label-btn { justify-content: center; padding-inline: 0; }
+.sidebar-compact .nav-item { justify-content: center; padding-inline: 0; }
+.sidebar-compact .nav-item span { display: none; }
+.sidebar-compact .sidebar-user { justify-content: center; padding-inline: 0; }
+.sidebar-compact .sidebar-account-actions { padding-inline: 0; align-items: center; }
+.sidebar-compact .sidebar-account-action { justify-content: center; width: 42px; padding-inline: 0; }
+
+@media (max-width: 900px) {
+  .portal-shell, .portal-shell.sidebar-compact { grid-template-columns: 1fr; }
+  .sidebar, .sidebar-compact .sidebar { width: min(300px, 88vw); padding: 20px 14px 16px; }
+  .sidebar-compact .sidebar-head { justify-content: space-between; padding: 0 8px 20px; }
+  .sidebar-compact .brand-copy,
+  .sidebar-compact .nav-label,
+  .sidebar-compact .nav-chevron,
+  .sidebar-compact .sidebar-user .user-info,
+  .sidebar-compact .sidebar-account-action span { display: initial; }
+  .sidebar-compact .nav-chevron { display: inline-grid; }
+  .sidebar-compact .sidebar-toggle { position: static; width: 42px; height: 42px; }
+  .sidebar-compact .nav-label-btn { justify-content: space-between; padding-inline: 10px; }
+  .sidebar-compact .nav-item { justify-content: flex-start; padding-inline: 11px; }
+  .sidebar-compact .nav-item span { display: inline; }
+  .sidebar-compact .sidebar-user { justify-content: flex-start; padding-inline: 8px; }
+  .sidebar-compact .sidebar-account-actions { padding-inline: 4px; align-items: stretch; }
+  .sidebar-compact .sidebar-account-action { justify-content: flex-start; width: auto; padding-inline: 9px; }
+  .topbar { padding-inline: 18px; }
+}
+
+@media (max-width: 640px) {
+  .content { padding: 24px 16px 42px; }
+  .page-head { gap: 14px; }
+  .page-head h1, .editor-head h1, .student-course-head h1 { font-size: 1.75rem; }
+  .topbar .help-topbar { min-height: 40px; padding-inline: 12px; }
+}
