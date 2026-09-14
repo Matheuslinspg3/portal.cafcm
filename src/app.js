@@ -2098,6 +2098,7 @@ async function renderPeople(content) {
         <button class="btn btn-quiet" data-download-people-template>${icon("download")} Modelo CSV</button>
         ${profileDepartment() === "management" ? `<button class="btn btn-secondary" data-export-people>${icon("download")} Salvar backup</button>` : ""}
         <button class="btn btn-secondary" data-dialog="people-import">${icon("upload")} Importar</button>
+        ${profileDepartment() === "management" ? `<button class="btn btn-secondary" data-dialog="invite-test">${icon("copy")} Usuário de teste</button>` : ""}
         <button class="btn btn-primary" data-dialog="invite">${icon("mail")} Enviar convite</button>
       </div>`)}
     <section class="people-summary">
@@ -2123,13 +2124,13 @@ async function renderPeople(content) {
           return `
           <article class="person-row">
             <span class="avatar">${escapeHtml(initials(person.fullName))}</span>
-            <div class="person-main"><strong>${escapeHtml(person.fullName || "Nome não informado")}</strong><small>${escapeHtml(person.email || "E-mail não disponível")}</small><small>${escapeHtml(organization)}</small></div>
-            <div class="person-access"><span class="role-pill">${roleLabels[person.role] || "Pendente"}</span><span class="status ${statusClass}">${statusLabel}</span></div>
+            <div class="person-main"><strong>${escapeHtml(person.fullName || "Nome não informado")}</strong><small>${person.isTest ? "Usuário de teste · login exibido na criação" : escapeHtml(person.email || "E-mail não disponível")}</small><small>${escapeHtml(organization)}</small></div>
+            <div class="person-access"><span class="role-pill">${roleLabels[person.role] || "Pendente"}</span>${person.isTest ? '<span class="status status-draft">Teste</span>' : `<span class="status ${statusClass}">${statusLabel}</span>`}</div>
             <div class="person-dates"><small>Criado em ${formatDate(person.createdAt, true)}</small><small>${person.lastSignInAt ? `Último acesso em ${formatDate(person.lastSignInAt, true)}` : "Ainda não acessou"}</small></div>
             <div class="person-actions">
               <button class="btn btn-small btn-secondary" data-person-history="${person.id}">${icon("history")} Histórico</button>
               ${canManage && person.accessExists && person.isActive ? `<button class="btn btn-small btn-secondary" data-edit-person="${person.id}">${icon("edit")} Perfil e senha</button>` : ""}
-              ${canManage && person.accessExists && person.isActive ? `<button class="btn btn-small btn-quiet" data-resend-access="${person.id}" data-access-pending="${pending}">${pending ? "Reenviar convite" : "Enviar recuperação"}</button>` : ""}
+              ${canManage && person.accessExists && person.isActive && !person.isTest ? `<button class="btn btn-small btn-quiet" data-resend-access="${person.id}" data-access-pending="${pending}">${pending ? "Reenviar convite" : "Enviar recuperação"}</button>` : ""}
               ${canManage && person.id !== state.profile.id && person.accessExists ? `<button class="btn btn-small ${inactive ? "btn-secondary" : "btn-danger-soft"}" data-set-person-active="${person.id}" data-person-active="${inactive ? "true" : "false"}" data-person-name="${escapeHtml(person.fullName)}">${inactive ? "Restaurar acesso" : "Excluir acesso"}</button>` : ""}
             </div>
           </article>
@@ -2866,19 +2867,21 @@ async function openDialog(type, recordId = null) {
     </form>`;
   }
 
-  if (type === "invite") {
+  if (type === "invite" || type === "invite-test") {
+    const isTest = type === "invite-test";
     const { data: companies } = await supabase.from("companies").select("id,name").eq("is_active", true).order("name");
     const staffRoleOption = profileDepartment() === "management" ? `<option value="cafcm_admin">Equipe CAFCM</option>` : "";
     body = `<form id="invite-form" class="dialog-form">
       <div class="form-grid two-columns">
         <label>Nome completo<input name="fullName" required minlength="2" maxlength="160" autofocus /></label>
-        <label>E-mail<input name="email" type="email" maxlength="254" required /></label>
+        <label class="test-email-field" ${isTest ? "hidden" : ""}>E-mail<input name="email" type="email" maxlength="254" ${isTest ? "disabled" : "required"} /></label>
       </div>
+      ${!isTest && profileDepartment() === "management" ? `<label class="test-user-toggle"><input name="testMode" type="checkbox" value="yes" data-test-user-toggle /><span><strong>Criar usuário de teste sem e-mail</strong><small>Disponível somente para a Direção. Não envia convite; gera uma senha de teste na hora.</small></span></label>` : ""}
       <label>Tipo de acesso<select name="role" required><option value="apprentice">Jovem aprendiz</option><option value="company">Representante de empresa</option>${staffRoleOption}</select></label>
       <label class="company-field">Empresa vinculada<select name="companyId"><option value="">Sem empresa vinculada</option>${(companies || []).map((company) => `<option value="${company.id}">${escapeHtml(company.name)}</option>`).join("")}</select><small>Opcional para o jovem e obrigatório para representantes de empresa.</small></label>
       <label class="department-field" hidden>Departamento<select name="department" disabled>${departmentOptions()}</select><small>O departamento define as áreas e os dados disponíveis para a equipe CAFCM.</small></label>
-      <p class="form-note">O convite será enviado ao e-mail informado. A pessoa confirma o acesso pelo link e cria a própria senha no primeiro acesso.</p>
-      <button class="btn btn-primary" type="submit">Criar acesso e enviar convite</button>
+      <p class="form-note">${isTest ? "Este usuário será criado para testes, sem envio de e-mail. A senha e o login técnico serão exibidos uma única vez." : "O convite será enviado ao e-mail informado. A pessoa confirma o acesso pelo link e cria a própria senha no primeiro acesso."}</p>
+      <button class="btn btn-primary" type="submit">${isTest ? "Criar usuário de teste" : "Criar acesso e enviar convite"}</button>
     </form>`;
   }
 
@@ -3204,6 +3207,18 @@ async function openDialog(type, recordId = null) {
 function renderInviteCredentials(email, password, mode = "invite") {
   const root = document.querySelector("#overlay-root");
   if (!root) return;
+  if (mode === "test") {
+    root.innerHTML = `<div class="dialog-backdrop"><section class="dialog invite-success" role="dialog" aria-modal="true" aria-labelledby="invite-success-title">
+      <div class="dialog-head"><div><span class="eyebrow">Ambiente de testes</span><h2 id="invite-success-title">Usuário de teste criado</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
+      <div class="success-symbol">${icon("copy")}</div>
+      <p>Este acesso não envia e-mail e está marcado como usuário de teste. Use os dados abaixo para entrar no portal.</p>
+      <div class="credential-box"><div><small>Login técnico</small><code>${escapeHtml(email)}</code></div><button class="btn btn-secondary btn-small" data-copy-password="${escapeHtml(email)}">${icon("copy")} Copiar login</button></div>
+      <div class="credential-box"><div><small>Senha inicial</small><code>${escapeHtml(password)}</code></div><button class="btn btn-secondary btn-small" data-copy-password="${escapeHtml(password)}">${icon("copy")} Copiar senha</button></div>
+      <div class="dialog-instructions">Guarde estas credenciais. Elas não serão exibidas novamente e não devem ser usadas para usuários reais.</div>
+      <button class="btn btn-primary btn-block" data-close-dialog>Concluir</button>
+    </section></div>`;
+    return;
+  }
   if (mode === "invite") {
     root.innerHTML = `<div class="dialog-backdrop"><section class="dialog invite-success" role="dialog" aria-modal="true" aria-labelledby="invite-success-title">
       <div class="dialog-head"><div><span class="eyebrow">Acesso criado</span><h2 id="invite-success-title">Convite enviado por e-mail</h2></div><button class="dialog-close" data-close-dialog aria-label="Fechar">${icon("close")}</button></div>
@@ -4076,6 +4091,26 @@ app.addEventListener("change", (event) => {
     });
   }
 
+  if (event.target.matches("[data-test-user-toggle]")) {
+    const form = event.target.closest("form");
+    const emailField = form?.querySelector(".test-email-field");
+    const emailInput = emailField?.querySelector("input");
+    const enabled = event.target.checked;
+    if (emailField) emailField.hidden = enabled;
+    if (emailInput) {
+      emailInput.disabled = enabled;
+      emailInput.required = !enabled;
+      if (enabled) emailInput.value = "";
+    }
+    const note = form?.querySelector(".form-note");
+    if (note) note.textContent = enabled
+      ? "Este usuário será criado para testes, sem envio de e-mail. A senha e o login técnico serão exibidos uma única vez."
+      : "O convite será enviado ao e-mail informado. A pessoa confirma o acesso pelo link e cria a própria senha no primeiro acesso.";
+    const submit = form?.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = enabled ? "Criar usuário de teste" : "Criar acesso e enviar convite";
+    return;
+  }
+
   if (event.target.name === "role") {
     const companyField = document.querySelector(".company-field");
     const departmentField = document.querySelector(".department-field");
@@ -4874,16 +4909,19 @@ app.addEventListener("submit", async (event) => {
 
     if (form.id === "invite-form") {
       if (values.role === "company" && !values.companyId) throw new Error("Selecione a empresa do representante.");
-      await callAdmin({
+      const testMode = values.testMode === "yes";
+      const result = await callAdmin({
         action: "invite",
+        testMode,
         fullName: values.fullName,
-        email: values.email,
+        email: testMode ? "" : values.email,
         role: values.role,
         department: values.role === "cafcm_admin" ? values.department || "management" : null,
         companyId: values.role === "cafcm_admin" ? null : values.companyId || null,
       }, true);
       await renderView();
-      renderInviteCredentials(String(values.email).trim().toLowerCase());
+      if (testMode) renderInviteCredentials(result.loginEmail, result.temporaryPassword, "test");
+      else renderInviteCredentials(String(values.email).trim().toLowerCase());
       return;
     }
 
