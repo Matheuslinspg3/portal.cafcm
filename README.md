@@ -162,10 +162,21 @@ Para uma instalação nova, aplique os arquivos SQL nesta ordem:
 22. `supabase/migrations/20260911152640_phase_five_indicators.sql`
 23. `supabase/migrations/20260913201213_airtable_import_registry.sql`
 24. `supabase/migrations/20260913203317_tighten_import_registry_policies.sql`
+25. `supabase/migrations/20260919041156_tracked_links_campaigns.sql`
 
 Os testes transacionais de banco estão em `supabase/tests/` e podem ser executados com `supabase test db` em um ambiente local do Supabase.
 
 Revise os scripts antes de aplicá-los a uma base que já possui dados. A base CAFCM atual já recebeu essas evoluções; não execute novamente sem conferir o histórico de migrações.
+
+## Links rastreáveis
+
+Depois de aplicar a migration, publique a Edge Function que atende os links públicos:
+
+```bash
+npx supabase functions deploy link-redirect --project-ref cyovnmnxzrfptyfrivdr
+```
+
+O caminho público `https://portal.cafcm.org.br/r/:token` é encaminhado pela Vercel à função. Os tokens são aleatórios e não carregam CPF, telefone, e-mail, nome ou IDs internos. A função registra somente o evento de clique, um user-agent resumido e a origem do referenciador quando disponível; não armazena IP, localização ou fingerprint.
 
 ## Segurança
 
