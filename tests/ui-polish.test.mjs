@@ -34,7 +34,7 @@ test("abrir um grupo recolhe os demais sem mudar a rota", () => {
 test("sidebar segue a hierarquia funcional atual", () => {
   const admin = navigation.cafcm_admin;
   assert.deepEqual(Array.from(admin, (group) => group.label), [
-    "Painel", "Operações", "Empresas", "Jovens", "Recursos Humanos",
+    "Painel", "Operações", "Comunicação", "Empresas", "Jovens", "Recursos Humanos",
     "Departamento Pessoal", "Financeiro", "Documentos", "Pedagógico", "Gestão",
   ]);
   assert.doesNotMatch(app, /label: "Gestão de vagas"/);

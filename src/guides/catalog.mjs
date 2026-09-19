@@ -11,6 +11,12 @@ const documentFilters = step('.filter-bar', 'Busque e classifique', 'Pesquise pe
 const financeTabs = tabs('[aria-label="Áreas do financeiro"]', 'Contas a receber controla cobranças às empresas; Contas a pagar controla despesas; Calendário reúne os vencimentos. Feche o guia para trocar de aba e clique novamente em Como usar.');
 
 export const pageGuides = {
+  'tracked-links': guide('Links rastreáveis',
+    intro('Acompanhe comunicações com privacidade', 'Links gerais mostram o volume de acessos. Links individuais vinculam o acesso ao destinatário apenas no banco, sem dados pessoais na URL.'),
+    rows('Crie uma campanha', 'Use campanhas para reunir links de uma mesma ação. Criar uma campanha não envia nenhuma mensagem.'),
+    step('#tracked-link-form', 'Crie o link', 'Informe uma URL HTTPS ou HTTP válida e o tipo de rastreamento. O Portal cria um token aleatório, sem CPF, telefone, nome ou ID interno.', 'operations.manage'),
+    step('.metric-grid', 'Leia os acessos', 'Acessos totais são eventos registrados. O último acesso mostra a hora mais recente; não representa entrega ou leitura de uma mensagem.'),
+    rows('Preserve o histórico', 'Desativar impede novos acessos e arquivar tira o link da lista ativa. Nenhuma dessas ações apaga os eventos já registrados.', 'operations.manage')),
   overview: guide('Visão geral',
     intro('Comece pelas prioridades', 'Esta página resume a operação disponível ao seu departamento. O guia explica apenas esta tela; abra outra aba e use Como usar para ver o roteiro dela.'),
     metrics('Os cartões mostram registros reais da operação. Zero significa que não há registros naquele recorte, não que você precisa criar exemplos.'),
@@ -66,6 +72,11 @@ export const pageGuides = {
     rows('Origem e horário', 'Cada linha distingue atualização manual, agendada ou do sistema e informa quando começou.'),
     rows('Leia os totais', 'Alertas, notificações e tarefas são resultados da execução. Não representam pontuação ou produtividade individual.'),
     rows('Quando houver falha', 'Registre o horário e a mensagem mostrada para solicitar suporte. Não compartilhe senhas ou dados privados em capturas.')),
+  notes: guide('Notas',
+    intro('Organize a emissão e o histórico', 'Esta tela reúne os controles internos de notas fiscais. Confira a empresa, competência e situação antes de registrar qualquer informação.'),
+    metrics('Os cartões apresentam registros e situações já existentes. Eles não substituem a emissão fiscal no sistema autorizado da instituição.'),
+    rows('Consulte os lançamentos', 'Leia empresa, competência, valores e situação antes de editar. Preserve o histórico de uma nota já registrada.'),
+    rows('Mantenha a conferência humana', 'O Portal organiza informações operacionais; decisões fiscais, emissão e envio externo continuam dependendo de conferência responsável.')),
   indicators: guide('Indicadores e relatórios',
     intro('Leia o recorte permitido', 'Os relatórios usam dados reais e respeitam o departamento. A visão individual de carga não é um ranking de funcionários.'),
     step('#indicator-filter-form', 'Período e área', 'Escolha início, fim e área e clique Atualizar relatório. O intervalo é limitado pelo sistema. O período de um relatório não transforma todo indicador em uma série histórica.'),

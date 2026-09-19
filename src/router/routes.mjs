@@ -9,6 +9,7 @@ export const routeMap = {
   "/notificacoes": { view: "notifications", title: "Notificações" },
   "/automacoes": { view: "automations", title: "Automações", tab: "overview" },
   "/automacoes/historico": { view: "automations", title: "Automações - Histórico", tab: "history" },
+  "/comunicacao/links": { view: "tracked-links", title: "Links rastreáveis" },
 
   // Recursos Humanos
   "/vagas": { view: "vacancies", title: "Vagas e candidatos", tab: "overview" },
@@ -65,6 +66,7 @@ export const viewToUrl = {
   "tasks": "/tarefas",
   "notifications": "/notificacoes",
   "automations": "/automacoes",
+  "tracked-links": "/comunicacao/links",
   "vacancies": "/vagas",
   "partnerships": "/parcerias",
   "companies": "/empresas",
