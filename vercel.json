@@ -4,6 +4,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/r/:token",
+      "destination": "https://cyovnmnxzrfptyfrivdr.supabase.co/functions/v1/link-redirect/:token"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
