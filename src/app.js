@@ -65,6 +65,7 @@ const state = {
   indicatorStart: "",
   indicatorEnd: "",
   indicatorGroup: "all",
+  trackedLinkSearch: "",
 };
 
 const pageTour = createPageTour({
@@ -234,6 +235,7 @@ const viewPermissions = {
   tasks: "operations.read",
   notifications: "operations.read",
   automations: "operations.read",
+  "tracked-links": "operations.read",
   vacancies: "vacancies.read",
   partnerships: "vacancies.read",
   companies: "companies.read",
@@ -385,6 +387,7 @@ const navigation = {
       ["tasks", "Tarefas e Pendências", "tasks"],
       ["notifications", "Notificações", "bell"],
     ] },
+    { label: "Comunicação", items: [["tracked-links", "Links rastreáveis", "link", { route: "/comunicacao/links" }]] },
     { label: "Empresas", items: [
       ["companies", "Empresas", "building"],
       ["partnerships", "Parcerias / Convênios", "link"],
@@ -657,6 +660,7 @@ function viewTitle(view) {
     tasks: ["Tarefas e Pendências", "Responsáveis, prazos e checklists"],
     notifications: ["Notificações", "Atualizações direcionadas ao seu acesso"],
     automations: ["Automações", "Alertas, documentos e comunicações"],
+    "tracked-links": ["Links rastreáveis", "Campanhas, acessos e acompanhamento"],
     companies: ["Empresas", "Parceiros vinculados aos aprendizes"],
     apprentices: ["Jovens / Aprendizes", "Cadastro central dos jovens"],
     admissions: ["Admissões", "Documentos, contratos e início do jovem"],
@@ -999,6 +1003,7 @@ async function renderView() {
       tasks: renderTasks,
       notifications: renderNotifications,
       automations: renderAutomations,
+      "tracked-links": renderTrackedLinks,
       companies: renderCompanies,
       apprentices: renderApprentices,
       admissions: renderAdmissions,
@@ -2077,6 +2082,43 @@ async function renderProcedures(content) {
     <section class="metric-grid">${metric("Processos abertos", items.filter((item) => !item.closed_at).length, "kanban")}${metric("Processos atrasados", overdueItems.length, "alert")}${metric("Tarefas abertas", tasks.length, "tasks")}${metric("Sem responsável", unassigned.length, "users")}</section>
     <section class="administrative-hub-grid">${pipelines.map((pipeline) => { const openCount = items.filter((item) => item.pipeline_id === pipeline.id && !item.closed_at).length; return `<button class="administrative-module-card" data-open-procedure-pipeline="${pipeline.id}"><span style="color:${pipeline.color}">${icon("kanban")}</span><div><strong>${escapeHtml(pipeline.name)}</strong><small>${openCount} processo(s) aberto(s)</small></div>${icon("chevron")}</button>`; }).join("")}</section>
     <section class="card"><div class="card-head"><div><span class="eyebrow">Prioridade</span><h2>Prazos vencidos</h2></div></div>${urgentRows.length ? `<div class="people-list">${urgentRows.map((item) => operationalRow(item.title, item.detail, item.type, "")).join("")}</div>` : emptyState("Nenhum prazo vencido", "Os processos e tarefas administrativos estão dentro do prazo registrado.")}</section>`;
+}
+
+async function renderTrackedLinks(content) {
+  const canManage = hasPermission("operations.manage");
+  const [campaignResult, linkResult, eventResult, profileResult, candidateResult] = await Promise.all([
+    supabase.from("campaigns").select("*").is("archived_at", null).order("created_at", { ascending: false }),
+    supabase.from("tracked_links").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(250),
+    supabase.from("tracked_link_events").select("tracked_link_id,occurred_at").order("occurred_at", { ascending: false }).limit(5000),
+    supabase.from("profiles").select("id,full_name,role").eq("is_active", true).order("full_name").limit(500),
+    supabase.from("candidates").select("id,full_name").neq("status", "archived").order("full_name").limit(500),
+  ]);
+  for (const result of [campaignResult, linkResult, eventResult, profileResult, candidateResult]) if (result.error) throw result.error;
+  const campaigns = campaignResult.data || [];
+  const links = linkResult.data || [];
+  const events = eventResult.data || [];
+  const campaignMap = new Map(campaigns.map((item) => [item.id, item.name]));
+  const eventMap = new Map();
+  for (const event of events) {
+    const current = eventMap.get(event.tracked_link_id) || { total: 0, last: null };
+    current.total += 1;
+    if (!current.last || event.occurred_at > current.last) current.last = event.occurred_at;
+    eventMap.set(event.tracked_link_id, current);
+  }
+  const query = state.trackedLinkSearch.trim().toLocaleLowerCase("pt-BR");
+  const filtered = links.filter((item) => !query || `${item.title} ${item.destination_url} ${campaignMap.get(item.campaign_id) || ""}`.toLocaleLowerCase("pt-BR").includes(query));
+  const campaignOptions = campaigns.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
+  const recipientOptions = [
+    ...(profileResult.data || []).map((item) => `<option value="profile:${item.id}">${escapeHtml(item.full_name)} · pessoa do Portal</option>`),
+    ...(candidateResult.data || []).map((item) => `<option value="candidate:${item.id}">${escapeHtml(item.full_name)} · candidato</option>`),
+  ].join("");
+  content.innerHTML = `
+    ${pageHead("Links rastreáveis", "Crie campanhas e acompanhe acessos sem expor dados pessoais.")}
+    ${canManage ? `<section class="card"><div class="card-head"><div><span class="eyebrow">Nova campanha</span><h2>Organize seus disparos</h2></div></div><form id="campaign-form" class="dialog-form inline-form"><div class="form-grid two-columns"><label>Nome<input name="name" required minlength="2" maxlength="180" placeholder="Ex.: Convocação Processo Seletivo" /></label><label>Canal<select name="channel"><option value="whatsapp">WhatsApp</option><option value="email">E-mail</option><option value="sms">SMS</option><option value="manual" selected>Manual</option><option value="other">Outro</option></select></label></div><label>Descrição opcional<textarea name="description" rows="2" maxlength="4000"></textarea></label><button class="btn btn-secondary" type="submit">Criar campanha</button></form></section>
+    <section class="card"><div class="card-head"><div><span class="eyebrow">Novo link</span><h2>Destino autorizado e token seguro</h2></div></div><form id="tracked-link-form" class="dialog-form inline-form"><div class="form-grid two-columns"><label>Nome do link<input name="title" required minlength="2" maxlength="180" placeholder="Ex.: Formulário de confirmação" /></label><label>URL de destino<input name="destinationUrl" type="url" required maxlength="2048" placeholder="https://..." /></label><label>Tipo<select name="trackingType" data-tracked-link-type><option value="general">Geral</option><option value="individual">Individual</option></select></label><label>Campanha<select name="campaignId"><option value="">Sem campanha</option>${campaignOptions}</select></label><label>Origem<select name="source"><option value="whatsapp">WhatsApp</option><option value="email">E-mail</option><option value="sms">SMS</option><option value="manual" selected>Manual</option><option value="other">Outro</option></select></label><label>Expira em<input name="expiresAt" type="datetime-local" /></label></div><label>Descrição opcional<textarea name="description" rows="2" maxlength="4000"></textarea></label><div class="individual-recipient" hidden><label>Primeiro destinatário<select name="recipient"><option value="">Selecione depois</option>${recipientOptions}</select><small>O token individual fica somente no banco e pode ser adicionado a outros destinatários posteriormente.</small></label></div><button class="btn btn-primary" type="submit">Criar link rastreável</button></form></section>` : ""}
+    <section class="metric-grid">${metric("Links ativos", links.filter((item) => item.is_active && !item.archived_at).length, "link")}${metric("Acessos totais", events.length, "history")}${metric("Campanhas", campaigns.length, "mail")}</section>
+    <section class="filter-bar card"><label class="search-field">${icon("search")}<input type="search" data-tracked-link-search value="${escapeHtml(state.trackedLinkSearch)}" placeholder="Buscar por link, destino ou campanha" /></label></section>
+    <section class="card"><div class="card-head"><div><span class="eyebrow">Links criados</span><h2>Acompanhamento</h2></div></div><div class="people-list">${filtered.length ? filtered.map((item) => { const stats = eventMap.get(item.id) || { total: 0, last: null }; const publicUrl = `${SITE_ORIGIN}/r/${item.token}`; const status = item.archived_at ? "Arquivado" : !item.is_active ? "Inativo" : item.expires_at && new Date(item.expires_at) <= new Date() ? "Expirado" : "Ativo"; return `<article class="person-row"><span class="avatar">${icon("link")}</span><div class="person-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.destination_url)} · ${escapeHtml(campaignMap.get(item.campaign_id) || "Sem campanha")}</small><small>${escapeHtml(publicUrl)}</small></div><div class="person-access"><span class="status status-draft">${escapeHtml(status)}</span><small>${stats.total} acesso(s)${stats.last ? ` · último ${formatDate(stats.last, true)}` : ""}</small></div><div class="person-actions"><button class="btn btn-small btn-secondary" data-copy-tracked-link="${escapeHtml(publicUrl)}">${icon("copy")} Copiar</button>${canManage && !item.archived_at ? `<button class="btn btn-small btn-quiet" data-toggle-tracked-link="${item.id}" data-next-active="${item.is_active ? "false" : "true"}">${item.is_active ? "Desativar" : "Ativar"}</button><button class="btn btn-small btn-quiet" data-archive-tracked-link="${item.id}">Arquivar</button>` : ""}</div></article>`; }).join("") : emptyState("Nenhum link encontrado", query ? "Altere a busca para localizar outro link." : "Crie o primeiro link rastreável para uma campanha.")}</div></section>`;
 }
 
 async function renderPeople(content) {
@@ -3442,6 +3484,23 @@ window.addEventListener("routeChange", () => {
 });
 
 app.addEventListener("click", async (event) => {
+  const trackedAction = event.target.closest("[data-copy-tracked-link],[data-toggle-tracked-link],[data-archive-tracked-link]");
+  if (trackedAction?.dataset.copyTrackedLink) {
+    try { await navigator.clipboard.writeText(trackedAction.dataset.copyTrackedLink); showToast("Link copiado."); }
+    catch { showToast("Não foi possível copiar automaticamente. Selecione o link e copie.", "error"); }
+    return;
+  }
+  if (trackedAction?.dataset.toggleTrackedLink) {
+    const { error } = await supabase.from("tracked_links").update({ is_active: trackedAction.dataset.nextActive === "true" }).eq("id", trackedAction.dataset.toggleTrackedLink);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast(trackedAction.dataset.nextActive === "true" ? "Link ativado." : "Link desativado."); return renderView();
+  }
+  if (trackedAction?.dataset.archiveTrackedLink) {
+    if (!window.confirm("Arquivar este link? Os acessos registrados serão preservados.")) return;
+    const { error } = await supabase.from("tracked_links").update({ archived_at: new Date().toISOString(), is_active: false }).eq("id", trackedAction.dataset.archiveTrackedLink);
+    if (error) return showToast(friendlyError(error), "error");
+    showToast("Link arquivado; o histórico foi preservado."); return renderView();
+  }
   const navLink = event.target.closest("a.nav-item");
   if (navLink) {
     event.preventDefault();
@@ -4028,6 +4087,11 @@ app.addEventListener("click", async (event) => {
 });
 
 app.addEventListener("change", (event) => {
+  if (event.target.matches("[data-tracked-link-type]")) {
+    const recipient = event.target.closest("form")?.querySelector(".individual-recipient");
+    if (recipient) recipient.hidden = event.target.value !== "individual";
+    return;
+  }
   if (event.target.matches("[data-email-template]")) {
     const option = event.target.selectedOptions?.[0];
     const form = event.target.closest("form");
@@ -4153,6 +4217,12 @@ app.addEventListener("change", (event) => {
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.matches("[data-tracked-link-search]")) {
+    state.trackedLinkSearch = event.target.value;
+    window.clearTimeout(app.trackedLinkSearchTimer);
+    app.trackedLinkSearchTimer = window.setTimeout(() => renderView(), 250);
+    return;
+  }
   if (event.target.matches("[data-pipeline-search]")) {
     state.pipelineSearch = event.target.value;
     window.clearTimeout(app.pipelineSearchTimer);
@@ -4230,6 +4300,34 @@ app.addEventListener("submit", async (event) => {
   setBusy(form, true);
 
   try {
+    if (form.id === "campaign-form") {
+      const { error } = await supabase.from("campaigns").insert({
+        name: String(values.name || "").trim(), description: String(values.description || "").trim(),
+        channel: values.channel || "manual", created_by: state.profile.id,
+      });
+      if (error) throw error;
+      showToast("Campanha criada."); return renderView();
+    }
+    if (form.id === "tracked-link-form") {
+      let destination;
+      try { destination = new URL(String(values.destinationUrl || "").trim()); } catch { throw new Error("Informe uma URL de destino válida."); }
+      if (!/^https?:$/.test(destination.protocol)) throw new Error("A URL de destino deve usar HTTP ou HTTPS.");
+      const expiresAt = values.expiresAt ? new Date(String(values.expiresAt)) : null;
+      if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt <= new Date())) throw new Error("A expiração precisa estar no futuro.");
+      const token = crypto.getRandomValues(new Uint8Array(24));
+      const tokenValue = Array.from(token, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      const payload = { title: String(values.title || "").trim(), description: String(values.description || "").trim(), destination_url: destination.toString(), tracking_type: values.trackingType || "general", token: tokenValue, source: values.source || "manual", campaign_id: values.campaignId || null, expires_at: expiresAt?.toISOString() || null, created_by: state.profile.id };
+      const { data: link, error } = await supabase.from("tracked_links").insert(payload).select("id").single();
+      if (error) throw error;
+      if (payload.tracking_type === "individual" && values.recipient) {
+        const [recipientType, recipientId] = String(values.recipient).split(":");
+        const recipientBytes = crypto.getRandomValues(new Uint8Array(24));
+        const recipientToken = Array.from(recipientBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+        const { error: recipientError } = await supabase.from("tracked_link_recipients").insert({ tracked_link_id: link.id, recipient_type: recipientType, recipient_id: recipientId, tracking_token: recipientToken });
+        if (recipientError) throw recipientError;
+      }
+      showToast("Link rastreável criado."); return renderView();
+    }
     if (form.id === "login-form") {
       const { error } = await supabase.auth.signInWithPassword({ email: String(values.email).trim(), password: String(values.password) });
       if (error) {
