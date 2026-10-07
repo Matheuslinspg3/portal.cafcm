@@ -1,0 +1,50 @@
+name: Coletor de certidoes - Windows
+
+on:
+  pull_request:
+    paths:
+      - 'tools/certidoes-aprendiz/**'
+      - '.github/workflows/certidoes-aprendiz.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certidoes-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/certidoes-aprendiz
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/certidoes-aprendiz/requirements*.txt
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements-dev.txt
+      - name: Testes offline
+        run: |
+          python -m playwright install chromium
+          python -m pytest
+      - name: Verificar interface Tk
+        run: python -m tests.gui_smoke
+      - name: Compilar aplicativo Windows
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name CAFCM-Certidoes --collect-all playwright launch.py
+      - name: Verificar executavel offline
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath dist/CAFCM-Certidoes/CAFCM-Certidoes.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Falha no executavel: $($process.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CAFCM-Certidoes-Windows
+          path: tools/certidoes-aprendiz/dist/CAFCM-Certidoes/
+          retention-days: 14
