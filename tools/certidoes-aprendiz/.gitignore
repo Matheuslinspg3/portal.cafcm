@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+.venv/
+build/
+dist/
+*.spec
+dados/
+*.sqlite3*
+*.pdf
+*.csv
+*.zip
+perfil_navegador/
+base*.json
